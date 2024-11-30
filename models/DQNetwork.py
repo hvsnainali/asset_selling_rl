@@ -1,32 +1,23 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 class DQNetwork(nn.Module):
-    def __init__(self, state_size, action_size, hidden_size=128):
-        """
-        Initialize the deep Q-network.
-
-        Args:
-            state_size (int): Number of features in the state.
-            action_size (int): Number of possible actions.
-            hidden_size (int): Number of units in the hidden layers.
-        """
+    def __init__(self, state_size, action_size):
         super(DQNetwork, self).__init__()
-        self.fc1 = nn.Linear(state_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, action_size)
+        self.fc = nn.Sequential(
+            nn.Linear(state_size, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, action_size)
+        )
+        self._initialize_weights()
 
-    def forward(self, state):
-        """
-        Perform a forward pass through the network.
+    def forward(self, x):
+        return self.fc(x)
 
-        Args:
-            state (torch.Tensor): The input state tensor.
-
-        Returns:
-            torch.Tensor: Q-values for each action.
-        """
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)  # No activation on the output layer (Q-values)
+    def _initialize_weights(self):
+        for layer in self.fc:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                nn.init.zeros_(layer.bias)
