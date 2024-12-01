@@ -34,8 +34,8 @@ if __name__ == "__main__":
     data = load_data(cryptocurrencies=cryptocurrencies)
 
     # Training parameters
-    episodes = 150
-    batch_size = 64
+    episodes = 300
+    batch_size = 128
 
     # Initialize lists for tracking metrics
     episode_rewards = []  # To store total rewards per episode
@@ -112,8 +112,7 @@ if __name__ == "__main__":
 
             # Log episode result
             episode_rewards.append(total_reward)  # Track total reward per episode
-            print(f"Episode {e + 1}/{episodes}, Total Reward: {total_reward}, Average Loss: {avg_loss}, 
-                  " f"Profit: {cumulative_profit}, Successful Trades: {successful_trades}, " f"Unsuccessful Trades: {unsuccessful_trades}")
+            print(f"Episode {e + 1}/{episodes}, Total Reward: {total_reward}, Average Loss: {avg_loss},Profit: {cumulative_profit}, Successful Trades: {successful_trades}, " f"Unsuccessful Trades: {unsuccessful_trades}")
 
         print(f"Training complete for {symbol}!")
 

@@ -57,7 +57,7 @@ class CryptoEnvRL(Env):
             else:
                 reward = -0.1  # Penalty for invalid buy
         elif action == 1:  # Hold
-            reward = -0.005
+            reward = -0.05
         elif action == 2:  # Sell
             if self.stock_owned == 1:
                 reward = self.price_series[self.t] - self.buy_price
