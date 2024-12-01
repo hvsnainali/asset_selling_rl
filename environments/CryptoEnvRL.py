@@ -4,17 +4,20 @@ from gym import Env
 from gym.spaces import Discrete, Box
 
 class CryptoEnvRL(Env):
-    def __init__(self, price_series, window_size=7):
+    def __init__(self, price_series, volume_series, window_size=7):
         super(CryptoEnvRL, self).__init__()
         self.price_series = price_series
+        self.volume_series = volume_series
         self.window_size = window_size
-        self.state_size = 7  # State: RSI, SMA, Momentum, Volatility, Stock Owned, Buy Price, Current Price
+        self.state_size = 9  # State: RSI, SMA, Momentum, Volatility, Volume, Stock Owned, Buy Price, Current Price, VWAP
         self.action_space = Discrete(3)  # Actions: Buy (0), Hold (1), Sell (2)
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.state_size,), dtype=np.float32)
         self.reset()
 
     def _calculate_indicators(self):
         prices = self.price_series
+        volumes = self.volume_series
+
         delta = np.diff(prices, prepend=prices[0])
         gain = np.where(delta > 0, delta, 0)
         loss = np.where(delta < 0, -delta, 0)
@@ -26,6 +29,15 @@ class CryptoEnvRL(Env):
         self.momentum = prices - np.roll(prices, 5)
         self.momentum[:5] = 0
         self.volatility = pd.Series(prices).rolling(window=14, min_periods=1).std().values
+        
+        # VWAP
+        cumulative_price_volume = np.cumsum(prices * volumes)
+        cumulative_volume = np.cumsum(volumes)
+        self.vwap = cumulative_price_volume / (cumulative_volume + 1e-9)  # Avoid division by zero
+
+        self.vwap = (self.vwap - np.mean(self.vwap)) / np.std(self.vwap)
+        # Normalize Volume
+        self.volume_series = (volumes - np.mean(volumes)) / np.std(volumes)
 
     def _get_observation(self):
         state = np.array([
@@ -35,7 +47,9 @@ class CryptoEnvRL(Env):
             self.volatility[self.t],
             self.stock_owned,
             self.buy_price,
-            self.price_series[self.t]
+            self.price_series[self.t],
+            self.volume_series[self.t],
+            self.vwap[self.t],             
         ], dtype=np.float32)
         state = np.nan_to_num(state)
         return (state - np.mean(state)) / (np.std(state) + 1e-8)
@@ -54,18 +68,35 @@ class CryptoEnvRL(Env):
             if self.stock_owned == 0:
                 self.stock_owned = 1
                 self.buy_price = self.price_series[self.t]
+                reward = 0.1 # small positive for buying in time.
             else:
                 reward = -0.1  # Penalty for invalid buy
+
         elif action == 1:  # Hold
-            reward = -0.05
+              reward = -0.05
+              if self.stock_owned == 1:
+                holding_profit = self.price_series[self.t] - self.buy_price
+                reward += 0.01 * holding_profit
+
+                recent_volatility = np.std(self.price_series[max(0, self.t - 10): self.t])
+                if recent_volatility < 0.01:  # Adjust threshold based on dataset
+                   reward += 0.05
+
         elif action == 2:  # Sell
             if self.stock_owned == 1:
-                reward = self.price_series[self.t] - self.buy_price
-                reward = np.clip(reward, -100, 100)
+                profit = self.price_series[self.t] - self.buy_price
+                reward += profit 
+                reward = np.clip(reward, -500, 500)
+
+                #if self.volume_series[self.t] > np.mean(self.volume_series):
+                 #  reward += 0.05 * profit  # Higher reward for selling above VWAP
+
                 self.stock_owned = 0
                 self.buy_price = 0
             else:
                 reward = -0.1  # Penalty for invalid sell
+
+    
         self.t += 1
         done = self.t >= len(self.price_series) - 1
         return self._get_observation(), reward, done, {}

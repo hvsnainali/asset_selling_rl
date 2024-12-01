@@ -8,7 +8,7 @@ from .DQNetwork import DQNetwork
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.995, gamma=0.99, lr=0.001):
+    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.999, gamma=0.95, lr=0.0005):
         """
         Initialize a DQN Agent.
 
@@ -31,7 +31,7 @@ class DQNAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Replay memory
-        self.memory = deque(maxlen=2000)
+        self.memory = deque(maxlen=5000)
 
         # Neural networks for Q-learning
         self.model = DQNetwork(state_size, action_size).to(self.device)

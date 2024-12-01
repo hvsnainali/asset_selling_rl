@@ -23,7 +23,8 @@ def load_data(folder="data", cryptocurrencies=["BTC-USD"]):
         if os.path.exists(file_path):
             # Ensure proper column parsing
             df = pd.read_csv(file_path, index_col="Date", parse_dates=["Date"])
-            data[symbol] = df["Close"].values
+    
+            data[symbol] = df[["Close", "Volume"]]
         else:
             print(f"Data for {symbol} not found.")
     return data
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     data = load_data(cryptocurrencies=cryptocurrencies)
 
     # Training parameters
-    episodes = 300
+    episodes = 500
     batch_size = 128
 
     # Initialize lists for tracking metrics
@@ -44,17 +45,20 @@ if __name__ == "__main__":
 
     
 
-    for symbol, price_series in data.items():
+    for symbol, df in data.items():
         print(f"\n--- Training RL agent on {symbol} ---")
 
+        price_series = df["Close"].values  # Close prices
+        volume_series = df["Volume"].values  # Volume data
+
         # Initialize environment and agent
-        env = CryptoEnvRL(price_series)
+        env = CryptoEnvRL(price_series, volume_series)
         agent = DQNAgent(
-            state_size=7,  # 7 features in state
+            state_size=9,  # 9 features in state
             action_size=3,  # 3 actions: Buy, Hold, Sell
             epsilon=1.0,  # Initial exploration rate
             epsilon_min=0.1,  # Minimum exploration rate
-            epsilon_decay=0.995  # Decay factor for exploration rate
+            epsilon_decay=0.999  # Decay factor for exploration rate
         )
 
         # Training loop
@@ -66,6 +70,7 @@ if __name__ == "__main__":
             cumulative_profit = 0
             successful_trades = 0
             unsuccessful_trades = 0
+            shares_owned = 0
 
             done = False
             step = 0
@@ -80,7 +85,11 @@ if __name__ == "__main__":
                 # Step through environment
                 next_state, reward, done, _ = env.step(action)
 
-                # Accumulate rewards
+                # Track the share owned...
+                if env.stock_owned:
+                    shares_owned += 1
+
+                # Accumulate rewards...
                 total_reward += reward
                 if action == 2:  # Sell
                       if reward > 0:
@@ -112,15 +121,29 @@ if __name__ == "__main__":
 
             # Log episode result
             episode_rewards.append(total_reward)  # Track total reward per episode
-            print(f"Episode {e + 1}/{episodes}, Total Reward: {total_reward}, Average Loss: {avg_loss},Profit: {cumulative_profit}, Successful Trades: {successful_trades}, " f"Unsuccessful Trades: {unsuccessful_trades}")
+            print(f"Episode {e + 1}/{episodes}, Epsilon: {agent.epsilon:.4f}, Total Reward: {total_reward}, "
+                    f"Average Loss: {avg_loss}, Profit: {cumulative_profit}, "
+                    f"Shares Owned: {shares_owned}, "
+                    f"Successful Trades: {successful_trades}, "
+                    f"Unsuccessful Trades: {unsuccessful_trades}")
 
         print(f"Training complete for {symbol}!")
+
+    portfolio_value = (env.stock_owned * env.price_series[env.t]) + cumulative_profit
+    print(f"Portfolio Value at Episode End: {portfolio_value}")
 
     # Action Distribution
     print("\nAction Distribution:")
     for action, count in action_counts.items():
         action_name = ["Buy", "Hold", "Sell"][action]
         print(f"{action_name}: {count} times")
+
+    action_history = []
+    while not done:
+        action = agent.act(state)
+        action_history.append(action)
+        ...
+    print(f"Action History: {action_history}")
 
     # Plot rewards per episode
     plt.figure(figsize=(12, 6))
@@ -130,6 +153,7 @@ if __name__ == "__main__":
     plt.ylabel("Total Reward")
     plt.title("Rewards per Episode")
     plt.legend()
+
 
     # Plot training loss per episode
     plt.subplot(1, 2, 2)
