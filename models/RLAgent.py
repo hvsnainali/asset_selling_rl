@@ -8,7 +8,7 @@ from .DQNetwork import DQNetwork
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.999, gamma=0.95, lr=0.0005):
+    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.995, gamma=0.9, lr=0.00005):
         """
         Initialize a DQN Agent.
 
@@ -31,7 +31,7 @@ class DQNAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Replay memory
-        self.memory = deque(maxlen=5000)
+        self.memory = deque(maxlen=10000)
 
         # Neural networks for Q-learning
         self.model = DQNetwork(state_size, action_size).to(self.device)
@@ -51,13 +51,24 @@ class DQNAgent:
         """Store experiences in replay memory."""
         self.memory.append((state, action, reward, next_state, done))
 
-    def act(self, state):
+    def act(self, state, train =True):
         """Choose an action using an epsilon-greedy policy."""
+        if train and np.random.rand() <= self.epsilon:
+        # Exploration: choose a random action
+           return np.random.randint(self.action_size)
+        else:
+        # Exploitation: choose the action with the highest Q-value
+           state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Convert state to tensor
+           with torch.no_grad():  # Disable gradient computation for evaluation
+            act_values = self.model(state)  # Forward pass to get Q-values
+           return np.argmax(act_values.cpu().numpy()) 
+                                            
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)  # Explore
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Add batch dimension
-        q_values = self.model(state)
-        return torch.argmax(q_values).item()  # Exploit
+        
+            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Add batch dimension
+            q_values = self.model(state)
+            return torch.argmax(q_values).item()  # Exploit
 
     def replay(self, batch_size):
         """Train the model using a random batch from replay memory."""
