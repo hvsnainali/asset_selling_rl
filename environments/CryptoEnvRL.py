@@ -66,7 +66,6 @@ class CryptoEnvRL(Env):
             self.buy_price,
             self.price_series[self.t],
             self.volume_series[self.t],
-            
             self.vwap[self.t],        
             self.macd[self.t],      
         ], dtype=np.float32)
@@ -139,7 +138,10 @@ class CryptoEnvRL(Env):
                 reward +=  profit 
             
                 #reward = np.clip(reward, -100, 100)
-
+                #if self.macd[self.t] > 0:
+                 #   reward += 0.1 * profit
+                #elif self.macd[self.t] < 0:
+                #   reward -= 0.1 * abs(profit)
                 #if self.volume_series[self.t] > np.mean(self.volume_series):
                    #reward += 0.05 * profit  # Higher reward for selling above VWAP
 
