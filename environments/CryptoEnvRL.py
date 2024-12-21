@@ -8,7 +8,8 @@ class CryptoEnvRL(Env):
         super(CryptoEnvRL, self).__init__()
         self.price_series = price_series
         self.volume_series = volume_series
-        self.window_size = window_size
+        self.window_size = window_size 
+        #self.symbol = symbol
         self.state_size = 10  # State: RSI, SMA, Momentum, Volatility, Volume, Stock Owned, Buy Price, Current Price, VWAP
         self.action_space = Discrete(3)  # Actions: Buy (0), Hold (1), Sell (2)
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.state_size,), dtype=np.float32)
@@ -54,7 +55,26 @@ class CryptoEnvRL(Env):
 
         # Normalize Volume + Close Price
         self.volume_series = (volumes - np.mean(volumes)) / np.std(volumes)
-        #self.price_series = (prices - np.mean(prices)) / np.std(prices)
+        # self.price_series = (prices - np.mean(prices)) / np.std(prices)
+
+    def _calculate_stop_loss(self, current_price):
+        # Calculate a 10% stop-loss threshold
+        if self.stock_owned and ((current_price - self.buy_price) / self.buy_price < -0.10):
+            return True
+        return False
+    
+    # def decide_trade(self, rsi, sma_current, sma_previous, macd):
+    #     """Determine the trading action based on combined indicators."""
+    #     # Buy conditions
+    #     if rsi < 30 and macd > 0 and sma_current > sma_previous:
+    #         return 'buy'
+    #     # Sell conditions
+    #     elif rsi > 70 or (macd < 0 and sma_current < sma_previous):
+    #         return 'sell'
+    #     # Hold conditions
+    #     else:
+    #         return 'hold'
+
 
     def _get_observation(self):
         state = np.array([
@@ -93,22 +113,31 @@ class CryptoEnvRL(Env):
 
     def step(self, action):
         reward = -0.01  # Default time penalty
-        #recent_volatility = np.std(self.price_series[max(0, self.t - 10): self.t])
+        current_price = self.price_series[self.t]
+        # rsi = self.rsi[self.t]
+        # sma_current = self.sma[self.t]
+        # sma_previous = self.sma[self.t - 1] if self.t > 0 else self.sma[self.t]
+        # macd = self.macd[self.t]
+
+        # if action == 'auto':  # Allow automatic decision-making
+        #     action = self.decide_trade(rsi, sma_current, sma_previous, macd)
+
+        recent_volatility = np.std(self.price_series[max(0, self.t - 10): self.t])
         recent_trend = 0
         if self.t > 5:  # Ensure enough history is available
                 recent_trend = np.mean(self.price_series[self.t - 5:self.t]) - self.price_series[self.t - 6]
 
-        if self.last_action == action:
-            reward -= 0.05  # Penalize repeated actions 
+        # if self.last_action == action:
+        #     reward -= 0.10  # Penalize repeated actions 
 
-                # Save current action for the next step
-        self.last_action = action
+        #         # Save current action for the next step
+        # self.last_action = action
 
 
         if action == 0:  # Buy
             if self.stock_owned == 0:
                 self.stock_owned = 1
-                self.buy_price = self.price_series[self.t]
+                self.buy_price = current_price
                 reward = 0.2 # small positive for buying in time.
             else:
                 reward = -1 # Penalty for invalid buy
@@ -116,34 +145,35 @@ class CryptoEnvRL(Env):
         elif action == 1:  # Hold
               reward = -0.01
               if self.stock_owned == 1:
-                holding_profit = self.price_series[self.t] - self.buy_price
-                reward += 0.08 * holding_profit
+                holding_profit = current_price - self.buy_price
+                reward += 0.05 * holding_profit
               else:
-                 reward = -0.01
-
+                reward = -0.05
 
               if recent_trend > 0:
                  reward += 0.2 * recent_trend
 
-            
-
-              #if recent_volatility < 0.02:  # Low volatility threshold
-                # reward += 0.1  # reward for holding in calm conditions
-              #else:
-               # reward -= 0.01
+              if recent_volatility < 0.02:  # Low volatility threshold
+                 reward += 0.1  # reward for holding in calm conditions
+              else:
+                 reward -= 0.01
 
         elif action == 2:  # Sell
             if self.stock_owned == 1:
-                profit = self.price_series[self.t] - self.buy_price
+                if self._calculate_stop_loss(current_price):
+                   reward = -0.10  # Penalty for hitting stop loss
+ 
+                profit = current_price - self.buy_price
                 reward +=  profit 
             
                 #reward = np.clip(reward, -100, 100)
-                #if self.macd[self.t] > 0:
-                 #   reward += 0.1 * profit
-                #elif self.macd[self.t] < 0:
-                #   reward -= 0.1 * abs(profit)
-                #if self.volume_series[self.t] > np.mean(self.volume_series):
-                   #reward += 0.05 * profit  # Higher reward for selling above VWAP
+                # if self.macd[self.t] > 0:
+                #    reward += 0.1 * profit
+                # elif self.macd[self.t] < 0:
+                #    reward -= 0.1 * abs(profit)
+
+                if self.volume_series[self.t] > np.mean(self.volume_series):
+                   reward += 0.05 * profit  # Higher reward for selling above VWAP
 
                 if profit < 0:
                     reward += 2 * profit  # Amplify penalty for losses
@@ -152,7 +182,6 @@ class CryptoEnvRL(Env):
                 
                 if profit > 0:
                    reward += 1
-
 
                 self.stock_owned = 0
                 self.buy_price = 0

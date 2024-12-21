@@ -33,14 +33,15 @@ def load_data(folder="data", cryptocurrencies=["BTC-USD", "ETH-USD"]):
             print(f"Data for {symbol} not found.")
     return data
 
+
 if __name__ == "__main__":
     # Load cryptocurrency data
     cryptocurrencies = ["BTC-USD", "ETH-USD"]
     data = load_data(cryptocurrencies=cryptocurrencies)
 
     # Training parameters
-    episodes = 10
-    batch_size = 512
+    episodes = 1000
+    batch_size = 256
 
     # Initialize lists for tracking metrics
     episode_rewards = []  # To store total rewards per episode
@@ -52,28 +53,25 @@ if __name__ == "__main__":
     for symbol, (train_data, test_data)  in data.items():
         print(f"\n--- Training RL agent on {symbol} ---")
 
-        #price_series = df["Close"].values  # Close prices
-        #volume_series = df["Volume"].values  # Volume data
-
         # Split into train and test sets
+       # if symbol == "ETH-USD":
+        # Normalize only the ETH data
+         #   price_series_train = (train_data["Close"].values - np.mean(train_data["Close"].values)) / (np.std(train_data["Close"].values) + 1e-8)
+          #  volume_series_train = (train_data["Volume"].values - np.mean(train_data["Volume"].values)) / (np.std(train_data["Volume"].values) + 1e-8)
+           # price_series_test = (test_data["Close"].values - np.mean(test_data["Close"].values)) / (np.std(test_data["Close"].values) + 1e-9)
+           # volume_series_test = (test_data["Volume"].values - np.mean(test_data["Volume"].values)) / (np.std(test_data["Volume"].values) + 1e-8)
+       # else:
+        # Do not normalize other data
+
         price_series_train = train_data["Close"].values
         volume_series_train = train_data["Volume"].values
         price_series_test = test_data["Close"].values
         volume_series_test = test_data["Volume"].values
 
-        if symbol == "ETH-USD":
-           
-            #price_series_train = (price_series_train - np.mean(price_series_train)) / (np.std(price_series_train) + 1e-8)
-            volume_series_train = (volume_series_train - np.mean(volume_series_train)) / (np.std(volume_series_train) + 1e-8)
-
-            price_series_test = (price_series_test - np.mean(price_series_test)) / (np.std(price_series_test) + 1e-9)
-            volume_series_test = (volume_series_test - np.mean(volume_series_test)) / (np.std(volume_series_test) + 1e-8)
-            print("Normalisation for ETH-USD...")
-
         # Initialize environment and agent
         env = CryptoEnvRL(price_series_train, volume_series_train)
         agent = DQNAgent(
-            state_size=10,  # 9 features in state
+            state_size=10,  # 10 features in state
             action_size=3,  # 3 actions: Buy, Hold, Sell
             epsilon=1.0,  # Initial exploration rate
             epsilon_min=0.1,  # Minimum exploration rate
@@ -93,8 +91,8 @@ if __name__ == "__main__":
 
             done = False
             step = 0
-            max_steps = len(price_series_train)  # Limit to prevent infinite steps
-            episode_loss = []  # Store losses for this episode
+            max_steps = len(price_series_train)  
+            episode_loss = []  
 
             while not done and step < max_steps:
                 # Select action
@@ -156,9 +154,9 @@ if __name__ == "__main__":
         print(f"Episode {e}/{episodes}, Profit-Loss Ratio (PLR): {plr:.2f}")
 
           # Evaluation on test data
-        env_test = CryptoEnvRL(price_series_test, volume_series_test)
-        print(f"\n--- Evaluating RL agent on test data for {symbol} ---")
-       # evaluate_agent(env_test, agent, episodes=10,export_csv=True)
+    #     env_test = CryptoEnvRL(price_series_test, volume_series_test)
+    #     print(f"\n--- Evaluating RL agent on test data for {symbol} ---")
+    #    # evaluate_agent(env_test, agent, episodes=10,export_csv=True)
 
     portfolio_value = (env.stock_owned * env.price_series[env.t]) + cumulative_profit
     print(f"Portfolio Value at Episode End: {portfolio_value}")
@@ -169,23 +167,23 @@ if __name__ == "__main__":
         action_name = ["Buy", "Hold", "Sell"][action]
         print(f"{action_name}: {count} times")
 
-    # Plot rewards per episode
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1, 2, 1)
-    plt.plot(range(1, episodes + 1), episode_rewards, label="Rewards")
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.title("Rewards per Episode")
-    plt.legend()
+    # # Plot rewards per episode
+    # plt.figure(figsize=(12, 6))
+    # plt.subplot(1, 2, 1)
+    # plt.plot(range(1, episodes + 1), episode_rewards, label="Rewards")
+    # plt.xlabel("Episode")
+    # plt.ylabel("Total Reward")
+    # plt.title("Rewards per Episode")
+    # plt.legend()
 
 
-    # Plot training loss per episode
-    plt.subplot(1, 2, 2)
-    plt.plot(range(1, episodes + 1), training_losses, label="Loss", color="red")
-    plt.xlabel("Episode")
-    plt.ylabel("Average Training Loss")
-    plt.title("Training Loss per Episode")
-    plt.legend()
+    # # Plot training loss per episode
+    # plt.subplot(1, 2, 2)
+    # plt.plot(range(1, episodes + 1), training_losses, label="Loss", color="red")
+    # plt.xlabel("Episode")
+    # plt.ylabel("Average Training Loss")
+    # plt.title("Training Loss per Episode")
+    # plt.legend()
 
-    plt.tight_layout()
-    plt.show()
+    # plt.tight_layout()
+    # plt.show()

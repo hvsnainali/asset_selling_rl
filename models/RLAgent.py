@@ -8,7 +8,7 @@ from .DQNetwork import DQNetwork
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.995, gamma=0.9, lr=0.00005):
+    def __init__(self, state_size, action_size, epsilon=1, epsilon_min=0.1, epsilon_decay=0.995, gamma=0.9, lr=0.00001):
         """
         Initialize a DQN Agent.
 
