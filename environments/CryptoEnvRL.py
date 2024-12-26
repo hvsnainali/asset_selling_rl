@@ -4,7 +4,7 @@ from gym import Env
 from gym.spaces import Discrete, Box
 
 class CryptoEnvRL(Env):
-    def __init__(self, price_series, volume_series, window_size=7):
+    def __init__(self, price_series, volume_series, window_size=14):
         super(CryptoEnvRL, self).__init__()
         self.price_series = price_series
         self.volume_series = volume_series
@@ -161,12 +161,13 @@ class CryptoEnvRL(Env):
         elif action == 2:  # Sell
             if self.stock_owned == 1:
                 if self._calculate_stop_loss(current_price):
-                   reward = -0.10  # Penalty for hitting stop loss
+                   reward = -0.40  # Penalty for hitting stop loss
  
                 profit = current_price - self.buy_price
                 reward +=  profit 
             
                 #reward = np.clip(reward, -100, 100)
+                # remove this as it was added after
                 # if self.macd[self.t] > 0:
                 #    reward += 0.1 * profit
                 # elif self.macd[self.t] < 0:

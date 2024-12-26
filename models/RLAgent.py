@@ -8,7 +8,7 @@ from .DQNetwork import DQNetwork
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, epsilon=1, epsilon_min=0.1, epsilon_decay=0.995, gamma=0.9, lr=0.00001):
+    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.998, gamma=0.9, lr=0.00001):
         """
         Initialize a DQN Agent.
 
@@ -53,10 +53,13 @@ class DQNAgent:
 
     def act(self, state, train =True):
         """Choose an action using an epsilon-greedy policy."""
+
+         
         if train and np.random.rand() <= self.epsilon:
         # Exploration: choose a random action
            return np.random.randint(self.action_size)
         else:
+           self.model.eval()
         # Exploitation: choose the action with the highest Q-value
            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Convert state to tensor
            with torch.no_grad():  # Disable gradient computation for evaluation
@@ -72,6 +75,7 @@ class DQNAgent:
 
     def replay(self, batch_size):
         """Train the model using a random batch from replay memory."""
+        self.model.train() 
         if len(self.memory) < batch_size:
             return
 

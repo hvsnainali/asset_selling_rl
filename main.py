@@ -5,7 +5,11 @@ import matplotlib.pyplot as plt
 from collections import Counter
 from environments.CryptoEnvRL import CryptoEnvRL
 from models.RLAgent import DQNAgent
-from utils import evaluate_agent
+
+from test import evaluate_agent_deterministic
+
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 
 def load_data(folder="data", cryptocurrencies=["BTC-USD", "ETH-USD"]):
@@ -26,8 +30,8 @@ def load_data(folder="data", cryptocurrencies=["BTC-USD", "ETH-USD"]):
             df = pd.read_csv(file_path, index_col="Date", parse_dates=["Date"])
     
             #data[symbol] = df[["Close", "Volume"]]
-            train_data = df.loc["2017-01-01":"2019-12-31"]
-            test_data = df.loc["2020-01-01":"2024-01-01"]
+            train_data = df.loc["2017-01-01":"2022-10-31"]
+            test_data = df.loc["2022-11-01":"2024-01-01"]
             data[symbol] = (train_data, test_data)
         else:
             print(f"Data for {symbol} not found.")
@@ -40,8 +44,8 @@ if __name__ == "__main__":
     data = load_data(cryptocurrencies=cryptocurrencies)
 
     # Training parameters
-    episodes = 1000
-    batch_size = 256
+    episodes = 4
+    batch_size = 128
 
     # Initialize lists for tracking metrics
     episode_rewards = []  # To store total rewards per episode
@@ -54,19 +58,20 @@ if __name__ == "__main__":
         print(f"\n--- Training RL agent on {symbol} ---")
 
         # Split into train and test sets
-       # if symbol == "ETH-USD":
-        # Normalize only the ETH data
-         #   price_series_train = (train_data["Close"].values - np.mean(train_data["Close"].values)) / (np.std(train_data["Close"].values) + 1e-8)
-          #  volume_series_train = (train_data["Volume"].values - np.mean(train_data["Volume"].values)) / (np.std(train_data["Volume"].values) + 1e-8)
-           # price_series_test = (test_data["Close"].values - np.mean(test_data["Close"].values)) / (np.std(test_data["Close"].values) + 1e-9)
-           # volume_series_test = (test_data["Volume"].values - np.mean(test_data["Volume"].values)) / (np.std(test_data["Volume"].values) + 1e-8)
-       # else:
-        # Do not normalize other data
+        # if symbol == "ETH-USD":
+        # # Normalize only the ETH data
+        #     price_series_train = (train_data["Close"].values - np.mean(train_data["Close"].values)) / (np.std(train_data["Close"].values) + 1e-8)
+        #     volume_series_train = (train_data["Volume"].values - np.mean(train_data["Volume"].values)) / (np.std(train_data["Volume"].values) + 1e-8)
+        #     price_series_test = (test_data["Close"].values - np.mean(test_data["Close"].values)) / (np.std(test_data["Close"].values) + 1e-9)
+        #     volume_series_test = (test_data["Volume"].values - np.mean(test_data["Volume"].values)) / (np.std(test_data["Volume"].values) + 1e-8)
+        # else:
+        # # Do not normalize other data
 
         price_series_train = train_data["Close"].values
         volume_series_train = train_data["Volume"].values
         price_series_test = test_data["Close"].values
         volume_series_test = test_data["Volume"].values
+
 
         # Initialize environment and agent
         env = CryptoEnvRL(price_series_train, volume_series_train)
@@ -75,13 +80,20 @@ if __name__ == "__main__":
             action_size=3,  # 3 actions: Buy, Hold, Sell
             epsilon=1.0,  # Initial exploration rate
             epsilon_min=0.1,  # Minimum exploration rate
-            epsilon_decay=0.995  # Decay factor for exploration rate
+            epsilon_decay=0.998  # Decay factor for exploration rate
         )
+
+        test_env = CryptoEnvRL(price_series_test,volume_series_test)
+        trained_agent = DQNAgent(
+            state_size=10,
+            action_size=3
+        ) 
 
         # Training loop
         for e in range(episodes):
             print(f"Episode {e + 1}/{episodes}")
             state = env.reset()
+            agent.model.train()
             total_reward = 0
             
             cumulative_profit = 0
@@ -133,6 +145,7 @@ if __name__ == "__main__":
                 state = next_state
                 step += 1
 
+            
             # Average loss for the episode
             avg_loss = np.mean(episode_loss) if episode_loss else 0
             training_losses.append(avg_loss)  # Track average loss per episode
@@ -167,7 +180,68 @@ if __name__ == "__main__":
         action_name = ["Buy", "Hold", "Sell"][action]
         print(f"{action_name}: {count} times")
 
-    # # Plot rewards per episode
+
+    agent.model.eval()    
+    total_reward, actions_taken = evaluate_agent_deterministic(test_env, trained_agent)
+
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+
+    def update(frame):
+        ax1.clear()
+        ax2.clear()
+
+        # Plotting the rewards
+        ax1.plot(episode_rewards[:frame + 1], label='Total Rewards per Episode')
+        ax1.set_title('Rewards per Episode')
+        ax1.set_xlabel('Episode')
+        ax1.set_ylabel('Total Reward')
+        ax1.legend(loc='upper left')
+
+        # Plotting the losses
+        ax2.plot(training_losses[:frame + 1], label='Average Loss per Episode', color='red')       
+        ax2.set_title('Training Loss per Episode')
+        ax2.set_xlabel('Episode')
+        ax2.set_ylabel('Average Loss')
+        ax2.legend(loc='upper left')
+
+        plt.tight_layout()
+
+    ani = FuncAnimation(fig, update, frames=episodes, interval=250, repeat = False)
+    plt.show()
+
+    
+
+    # actions = ['Buy', 'Hold', 'Sell']
+
+    # # Simulated data collection
+    # action_counts = [Counter() for _ in range(episodes)]
+
+    # # Simulate action counting per episode
+    # for episode in range(episodes):
+    #     action_counts[episode].update({0: np.random.randint(0, 10), 1: np.random.randint(0, 10), 2: np.random.randint(0, 10)})
+
+    # # Plot setup
+    # fig, ax = plt.subplots()
+    # x = np.arange(len(actions))  # the label locations
+    # bars = ax.bar(x, [0, 0, 0], color=['green', 'blue', 'red'])
+
+    # ax.set_xticks(x)
+    # ax.set_xticklabels(actions)
+    # ax.set_ylim(0, 50)  # You may need to adjust this based on expected counts
+    # ax.set_title('Action Distribution Over Episodes')
+    # ax.set_ylabel('Counts')
+    # ax.set_xlabel('Actions')
+
+    # def update(frame):
+    #     for i, bar in enumerate(bars):
+    #         bar.set_height(action_counts[frame][i])
+    #     ax.set_title(f'Episode {frame + 1}')
+    #     return bars
+
+    # ani = FuncAnimation(fig, update, frames=episodes, repeat=False)
+    # plt.show()
+ 
     # plt.figure(figsize=(12, 6))
     # plt.subplot(1, 2, 1)
     # plt.plot(range(1, episodes + 1), episode_rewards, label="Rewards")

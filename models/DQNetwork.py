@@ -2,16 +2,17 @@ import torch
 import torch.nn as nn
 
 class DQNetwork(nn.Module):
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_size, action_size, dropout_rate=0.2):
         super(DQNetwork, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(state_size, 128),
             nn.ReLU(),
+            nn.Dropout(dropout_rate), 
             nn.Linear(128, 128),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(128, action_size)
         )
-        self._initialize_weights()
 
     def forward(self, x):
         return self.fc(x)
