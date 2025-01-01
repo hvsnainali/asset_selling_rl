@@ -8,7 +8,7 @@ from .DQNetwork import DQNetwork
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.998, gamma=0.9, lr=0.00001):
+    def __init__(self, state_size, action_size, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.998, gamma=0.9, lr=0.001):
         """
         Initialize a DQN Agent.
 
@@ -31,7 +31,7 @@ class DQNAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Replay memory
-        self.memory = deque(maxlen=10000)
+        self.memory = deque(maxlen=20000)
 
         # Neural networks for Q-learning
         self.model = DQNetwork(state_size, action_size).to(self.device)
@@ -50,28 +50,30 @@ class DQNAgent:
     def remember(self, state, action, reward, next_state, done):
         """Store experiences in replay memory."""
         self.memory.append((state, action, reward, next_state, done))
-
-    def act(self, state, train =True):
-        """Choose an action using an epsilon-greedy policy."""
-
-         
-        if train and np.random.rand() <= self.epsilon:
-        # Exploration: choose a random action
-           return np.random.randint(self.action_size)
-        else:
-           self.model.eval()
-        # Exploitation: choose the action with the highest Q-value
-           state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Convert state to tensor
-           with torch.no_grad():  # Disable gradient computation for evaluation
-            act_values = self.model(state)  # Forward pass to get Q-values
-           return np.argmax(act_values.cpu().numpy()) 
-                                            
-        if np.random.rand() <= self.epsilon:
-            return random.randrange(self.action_size)  # Explore
         
-            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Add batch dimension
-            q_values = self.model(state)
-            return torch.argmax(q_values).item()  # Exploit
+
+    def save(self, filename):
+        torch.save(self.model.state_dict(), filename)
+
+    def load(self, filename):
+        self.model.load_state_dict(torch.load(filename))
+        self.model.eval()  # Set to evaluation mode
+
+    def act(self, state, train=True):
+        """
+        Choose an action using an epsilon-greedy policy.
+        """
+        # If in training mode and random number < epsilon, pick random action:
+        if train and (np.random.rand() <= self.epsilon):
+            return np.random.randint(self.action_size)
+        else:
+            # Exploitation
+            self.model.eval()
+            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                act_values = self.model(state)
+            return np.argmax(act_values.cpu().numpy())
+        
 
     def replay(self, batch_size):
         """Train the model using a random batch from replay memory."""
