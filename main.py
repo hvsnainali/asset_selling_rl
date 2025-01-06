@@ -8,17 +8,28 @@ from matplotlib.animation import FuncAnimation
 from sklearn.model_selection import TimeSeriesSplit
 from environments.CryptoEnvRL import CryptoEnvRL
 from models.RLAgent import DQNAgent
-from collections import Counter
+from collections import Counter, deque
 from test import run_tests
-from test import evaluate_agent
+
 
 from test import (
+                calculate_sharpe_ratio,
+                calculate_sortino_ratio,
+                calculate_calmar_ratio,
+                calculate_max_drawdown, 
+                calculate_trade_stats,
+                plot_equity_vs_buyhold,
+                plot_drawdown,
+                plot_return_distribution,
                 analyze_rolling_std,
                 evaluate_agent_cumulative, 
                 evaluate_heuristic_sdp_cumulative,
                 evaluate_simple_policy_cumulative,
                 plot_three_strategies,
-                run_tests_with_separate_plots
+                plot_trade_distribution,
+                plot_portfolio_value,
+                evaluate_portfolio_on_training_data,
+                evaluate_agent_cumulative_with_portfolio
             )
 
 from environments.CryptoSDPModel import CryptoSDPModel, advanced_heuristic_policy_sdp
@@ -27,128 +38,97 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 
-# def load_data(folder="data", cryptocurrencies=["BTC-USD", "ETH-USD"]):
-#     """
-#     Load cryptocurrency data from CSV files.
-
-#     Args:
-#         folder (str): Directory containing the CSV files.
-#         cryptocurrencies (list): List of symbols to load.
-
-#     Returns:
-#         dict: Dictionary with cryptocurrency symbols as keys and price series as values.
-#     """
-#     data = {}
-#     for symbol in cryptocurrencies:
-#         file_path = os.path.join(folder, f"{symbol.replace('-', '_')}.csv")
-#         if os.path.exists(file_path):
-#             df = pd.read_csv(file_path, index_col="Date", parse_dates=["Date"])
-    
-#             #data[symbol] = df[["Close", "Volume"]]
-#             train_data = df.loc["2017-01-01":"2022-10-31"]
-#             test_data = df.loc["2022-11-01":"2024-01-01"]
-#             data[symbol] = (train_data, test_data)
-#         else:
-#             print(f"Data for {symbol} not found.")
-#     return data
-
-
-# if __name__ == "__main__":
-#     # Load cryptocurrency data
-#     cryptocurrencies = ["BTC-USD", "ETH-USD"]
-#     data = load_data(cryptocurrencies=cryptocurrencies)
-
 def load_data(folder, cryptocurrencies):
     """
     Load cryptocurrency data from CSV files.
 
     Args:
-        folder (str): Directory containing the CSV files.
+        folder (str): Directory containing the CSV files. 
         cryptocurrencies (list): List of symbols to load.
 
     Returns:
-        dict: Dictionary with cryptocurrency symbols as keys and price series as values.
+        dict: Dictionary with cryptocurrency symbols as keys 
+              and (train_df, test_df) as values.
     """
     data = {}
     for symbol in cryptocurrencies:
         file_path = os.path.join(folder, f"{symbol.replace('-', '_')}.csv")
         if os.path.exists(file_path):
             df = pd.read_csv(file_path, index_col="Date", parse_dates=["Date"])
-    
-            #data[symbol] = df[["Close", "Volume"]]
+            df.sort_index(inplace=True)
+
             train_data = df.loc["2017-01-01":"2022-12-31"]
             test_data = df.loc["2023-01-01":"2024-01-01"]
             data[symbol] = (train_data, test_data)
         else:
-            print(f"Data for {symbol} not found.")
+            print(f"Data for {symbol} not found in {folder}.")
     return data
 
-
-
 if __name__ == "__main__":
-    # Load cryptocurrency data
+    # 1) Load cryptocurrency data
     folder = "data"
-    cryptocurrencies = ["BTC-USD", "ETH-USD"]
+    cryptocurrencies = ["BTC-USD"]
     data = load_data(folder, cryptocurrencies)
 
-    # Training parameters
-    episodes = 10
-    batch_size = 128
+    # 2) Training parameters
+    episodes = 15
+    batch_size = 64
 
-    # Initialize lists for tracking metrics
-    episode_rewards = []  # To store total rewards per episode
-    training_losses = []  # To store average loss per episode
-    action_counts = Counter()  # To track the frequency of actions taken
+    # 3) Lists for tracking
+    episode_rewards = []    # total rewards per episode
+    training_losses = []    # average training loss per episode
+    action_counts = Counter()
 
-
-    for symbol, (train_data, test_data)  in data.items():
+    # 4) Loop over each symbol's train/test
+    for symbol, (train_data, test_data) in data.items():
         print(f"\n--- Training RL agent on {symbol} ---")
-
-        # Split into train and test sets
-        # if symbol == "ETH-USD":
-        # # Normalize only the ETH data
-        #     price_series_train = (train_data["Close"].values - np.mean(train_data["Close"].values)) / (np.std(train_data["Close"].values) + 1e-8)
-        #     volume_series_train = (train_data["Volume"].values - np.mean(train_data["Volume"].values)) / (np.std(train_data["Volume"].values) + 1e-8)
-        #     price_series_test = (test_data["Close"].values - np.mean(test_data["Close"].values)) / (np.std(test_data["Close"].values) + 1e-9)
-        #     volume_series_test = (test_data["Volume"].values - np.mean(test_data["Volume"].values)) / (np.std(test_data["Volume"].values) + 1e-8)
-        # else:
-        # # Do not normalize other data
 
         price_series_train = train_data["Close"].values
         volume_series_train = train_data["Volume"].values
         date_series_train = train_data.index
 
-
         price_series_test = test_data["Close"].values
         volume_series_test = test_data["Volume"].values
         date_series_test = test_data.index
 
-
-        # Initialize environment and agent
         print(f"Training data: {len(price_series_train)} entries")
         print(f"Test data: {len(price_series_test)} entries from {date_series_test[0]} to {date_series_test[-1]}")
 
+        # ------------------------------------------------
+        # Initialize environment (with 11-feature state) and DQN agent
+        # ------------------------------------------------
+        # By default, your CryptoEnvRL has single-share logic + a cash constraint
+        env = CryptoEnvRL(
+            price_series_train, 
+            volume_series_train,  
+            initial_cash=25000.0  # or any chosen amount
+        )
 
-        # ------------------------------------------------
-        # Initialize environment and DQN agent
-        # ------------------------------------------------
-        env = CryptoEnvRL(price_series_train, volume_series_train)
         agent = DQNAgent(
-            state_size=10,   # 10 features in state
+            state_size=11,   # 11 features in the new environment
             action_size=3,   # Buy, Hold, Sell
-            epsilon=1.0,     # Starting exploration rate
-            epsilon_min=0.1, # Minimum exploration rate
+            epsilon=1.0,     # Start exploration
+            epsilon_min=0.1,
             epsilon_decay=0.998
         )
 
-        # A second agent to load final weights for testing
-        test_env = CryptoEnvRL(price_series_test, volume_series_test)
+        # For plotting or final training check
+        train_env_for_plot = env
+
+        # Prepare a test environment
+        test_env = CryptoEnvRL(
+            price_series_test, 
+            volume_series_test,
+            initial_cash=25000.0
+        )
         trained_agent = DQNAgent(
-            state_size=10,
+            state_size=11,
             action_size=3
         ) 
-
+        
         returns = []
+        reward_window = deque(maxlen=5)
+
         print("Model weights before training:")
         print(agent.model.state_dict())
 
@@ -156,42 +136,40 @@ if __name__ == "__main__":
         # Training loop
         # ------------------------------------------------
         for e in range(episodes):
-            print(f"Episode {e + 1}/{episodes}")
+            print(f"Episode {e+1}/{episodes}")
             agent.model.train()
+
             state = env.reset()
-            total_reward = 0
-            
-            # Some metrics
-            cumulative_profit = 0
-            successful_trades = 0
-            unsuccessful_trades = 0
-            shares_owned = 0
+            total_reward = 0.0
 
             done = False
             step = 0
             max_steps = len(price_series_train)
             episode_loss = []
+            episode_portfolio_values = []
 
-            # Debug Q-values in the first episode for the first 20 steps
+            successful_trades = 0
+            unsuccessful_trades = 0
+
+            # (Optional) Debug Q-values in the first episode
             if e == 0:
-                print("Debugging Q-values during training episode 0 for the first 20 steps.")
+                print("Debugging Q-values for first 20 steps:")
                 for dbg_step in range(20):
                     with torch.no_grad():
-                        q_vals = agent.model(torch.FloatTensor(state).unsqueeze(0).to(agent.device))
+                        q_vals = agent.model(
+                            torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+                        )
                     dbg_action = np.argmax(q_vals.cpu().numpy())
-                    print(f"Step {dbg_step}, Q-vals={q_vals.cpu().numpy()}, Action={dbg_action}")
+                    print(f" Step {dbg_step}, Q-vals={q_vals.cpu().numpy()}, Action={dbg_action}")
 
-            # Step through environment
             while not done and step < max_steps:
-                action = agent.act(state)   # Epsilon-greedy
+                action = agent.act(state)  # Epsilon-greedy
                 action_counts[action] += 1
 
                 next_state, reward, done, _ = env.step(action)
                 total_reward += reward
+                returns.append(reward)
 
-                # Track trades
-                if env.stock_owned:
-                    shares_owned += 1
 
                 if action == 2:  # Sell
                     if reward > 0:
@@ -199,134 +177,130 @@ if __name__ == "__main__":
                     elif reward < 0:
                         unsuccessful_trades += 1
 
+                # Track step-level portfolio value (from env) if you like
+                episode_portfolio_values.append(env.portfolio_value)
 
-                
-                # Store experience and train
+                # Memory + replay
                 agent.remember(state, action, reward, next_state, done)
                 if len(agent.memory) > batch_size:
-                    loss = agent.replay(batch_size)
-                    episode_loss.append(loss)
+                    loss_val = agent.replay(batch_size)
+                    if loss_val is not None:
+                        episode_loss.append(loss_val)
 
                 state = next_state
                 step += 1
 
-            # After each episode
+            # End of episode stats
             avg_loss = np.mean(episode_loss) if episode_loss else 0
             training_losses.append(avg_loss)
-
             agent.decay_epsilon()
-            episode_rewards.append(total_reward)
 
-            print(f"Episode {e + 1}/{episodes}, Epsilon: {agent.epsilon:.4f}, Total Reward: {total_reward:.0f}, "
-                  f"Average Loss: {avg_loss:.0f}, Profit: {cumulative_profit:.2f}, "
-                  f"Shares Owned: {shares_owned}, "
-                  f"Successful Trades: {successful_trades}, "
-                  f"Unsuccessful Trades: {unsuccessful_trades}")
-            
-        # sharpe_ratio = sharpe_ratio(returns)
-        # print(f"Sharpe Ratio for {symbol}: {sharpe_ratio:.4f}")
-            # Save trained model and load into 'trained_agent'
-            agent.save("trained_agent.pth")
-            trained_agent.load("trained_agent.pth")
-            trained_agent.epsilon = 0.0  # pure exploitation at test
+            episode_rewards.append(total_reward)
+            reward_window.append(total_reward)
+            learning_metric = np.mean(reward_window)
+
+            final_portfolio_value = episode_portfolio_values[-1] if episode_portfolio_values else 0
+            print(
+                f"Episode {e+1}/{episodes}, "
+                f"Epsilon: {agent.epsilon:.4f}, "
+                f"Total Reward: {total_reward:.2f}, "
+                f"Average Loss: {avg_loss:.2f}, "
+                f"Final Portfolio: {final_portfolio_value:.2f}, "
+                f"Learning Metric: {learning_metric:.2f}, "
+                f"Successful Trades: {successful_trades}, "
+                f"Unsuccessful Trades: {unsuccessful_trades}"
+            )
+
+        # Save and load agent
+        agent.save("trained_agent.pth")
+        trained_agent.load("trained_agent.pth")
+        trained_agent.epsilon = 0.0  # pure exploitation
 
         print(f"Training complete for {symbol}!")
         print("Model weights after training:")
         print(agent.model.state_dict())
 
-        # # Save trained model and load into 'trained_agent'
-        # agent.save("trained_agent.pth")
-        # trained_agent.load("trained_agent.pth")
-        # trained_agent.epsilon = 0.0  # pure exploitation at test
-
-        # ------------------------------------------------
-        # Evaluate DQN on test set
-        # ------------------------------------------------
-        # from test import evaluate_agent
-        # dqn_total_reward, dqn_actions = evaluate_agent(test_env, trained_agent, print_qvals=True)
-        # print("DQN Total Reward on Test Environment:", dqn_total_reward)
-        # print("DQN Actions Distribution:", Counter(dqn_actions))
-
-        # Profit-Loss Ratio on the final training environment (optional)
         plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades+unsuccessful_trades)>0 else 0
         print(f"Final PLR (Train) => {plr:.2f}")
 
-        portfolio_value = (env.stock_owned * env.price_series[env.t]) + cumulative_profit
-        print(f"Portfolio Value at Episode End: {portfolio_value:.2f}")
+        # Sharpe ratio
+        sharpe_ratio = calculate_sharpe_ratio(returns)
+        print(f"Sharpe Ratio for {symbol}: {sharpe_ratio:.4f}")
+
+        solino_ratio = calculate_sortino_ratio(returns)
+        print(f"Solino Ratio for {symbol}: {solino_ratio:.4f}")
+
+        sharpe_rat = calculate_sharpe_ratio(returns)
+
+        vol = np.std(episode_portfolio_values)
 
         print("\nAction Distribution (Train Loop Overall):")
-        for action, count in action_counts.items():
-            action_name = ["Buy", "Hold", "Sell"][action]
-            print(f"{action_name}: {count} times")
+        for act, count in action_counts.items():
+            name = ["Buy", "Hold", "Sell"][act]
+            print(f"{name}: {count} times")
 
-        # Optionally, run your test harness
+        # ------------------------------------------------
+        # Evaluate the trained DQN on the test set
+        # ------------------------------------------------
         from test import run_tests
         run_tests(test_env, trained_agent, date_series_test)
-        
+
         analyze_rolling_std(price_series_test)
-        # Example: Test thresholds
 
-        # ------------------------------------------------
-        # Evaluate the SDP Heuristic on the Same Test Data
-        # ------------------------------------------------
-        # print("\n--- Running SDP Heuristic on Test Data ---")
-        # sdp_model = CryptoSDPModel(price_series_test, volume_series_test)
-        # sdp_total_reward, sdp_actions, sdp_rewards = advanced_heuristic_policy_sdp(sdp_model)
-        # print(f"[SDP] Heuristic Total Reward on Test: {sdp_total_reward:.2f}")
-        # print("SDP Actions Distribution:", Counter(sdp_actions))
+        # Evaluate DQN step by step
+        dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr = evaluate_agent_cumulative(
+            test_env, trained_agent, date_series_test
+        )
+        dqn_final = dqn_cum_profits[-1] if dqn_cum_profits else 0
+        dqn_sharpe = calculate_sharpe_ratio(dqn_cum_profits)
+        dqn_solino = calculate_sortino_ratio(dqn_cum_profits)
+        dqn_vol = np.std(dqn_cum_profits)
+        dqn_mdd = calculate_max_drawdown(dqn_cum_profits)
+        dqn_calmar = calculate_calmar_ratio(dqn_cum_profits) 
+        dqn_returns = np.diff(dqn_cum_profits, prepend=0)
+        dqn_win_rate, dqn_avg_return = calculate_trade_stats(dqn_actions, dqn_returns)
+        print("DQN steps:", len(dqn_dates), len(dqn_cum_profits))
 
-        # ------------------------------------------------
-        # Compare DQN vs. SDP actions visually
-        # ------------------------------------------------
-        # def compare_actions(price_data, actions_dqn, label_dqn, actions_sdp, label_sdp):
-        #     plt.figure(figsize=(12, 6))
-        #     plt.plot(price_data, color='gray', label='Price')
 
-        #     buy_dqn = [i for i, a in enumerate(actions_dqn) if a == 0]
-        #     sell_dqn = [i for i, a in enumerate(actions_dqn) if a == 2]
-        #     buy_sdp = [i for i, a in enumerate(actions_sdp) if a == 0]
-        #     sell_sdp = [i for i, a in enumerate(actions_sdp) if a == 2]
+        # Evaluate SDP heuristic
+        sdp_model = CryptoSDPModel(price_series_test, volume_series_test, initial_cash=25000.0)
+        sdp_dates, sdp_cum_profits, sdp_actions, sdp_plr = evaluate_heuristic_sdp_cumulative(
+            sdp_model, date_series_test
+        )
+        sdp_final = sdp_cum_profits[-1] if sdp_cum_profits else 0
+        sdp_sharpe = calculate_sharpe_ratio(sdp_cum_profits)
+        sdp_solino = calculate_sortino_ratio(sdp_cum_profits)
+        sdp_vol = np.std(sdp_cum_profits)
+        sdp_mdd = calculate_max_drawdown(sdp_cum_profits)
+        sdp_calmar = calculate_calmar_ratio(sdp_cum_profits) 
+        sdp_returns = np.diff(sdp_cum_profits, prepend=0)
+        sdp_win_rate, sdp_avg_return = calculate_trade_stats(sdp_actions, sdp_returns)
 
-        #     # DQN
-        #     plt.scatter(buy_dqn, [price_data[i] for i in buy_dqn],
-        #                 color='green', marker='^', label=f'{label_dqn} Buy')
-        #     plt.scatter(sell_dqn, [price_data[i] for i in sell_dqn],
-        #                 color='red', marker='v', label=f'{label_dqn} Sell')
+        # Evaluate simple
+        simp_env = CryptoEnvRL(
+            price_series_test, 
+            volume_series_test,
+            initial_cash=25000.0
+        )
+        simp_dates, simp_cumprofits, simp_step_actions, simple_plr = evaluate_simple_policy_cumulative(
+            test_env, date_series_test
+        )
+        simple_final = simp_cumprofits[-1] if simp_cumprofits else 0
+        simple_sharpe = calculate_sharpe_ratio(simp_cumprofits)
+        simple_solino = calculate_sortino_ratio(simp_cumprofits)
+        simple_vol = np.std(simp_cumprofits)
+        simple_mdd = calculate_max_drawdown(simp_cumprofits)
+        simple_calmar = calculate_calmar_ratio(simp_cumprofits) 
+        simple_returns = np.diff(simp_cumprofits, prepend=0)
+        simple_win_rate, simple_avg_return = calculate_trade_stats(simp_step_actions, simple_returns)
 
-        #     # SDP
-        #     plt.scatter(buy_sdp, [price_data[i] for i in buy_sdp],
-        #                 color='lime', marker='^', facecolors='none', label=f'{label_sdp} Buy')
-        #     plt.scatter(sell_sdp, [price_data[i] for i in sell_sdp],
-        #                 color='orange', marker='v', facecolors='none', label=f'{label_sdp} Sell')
 
-        #     plt.title(f"Comparison: {label_dqn} vs {label_sdp} (Test Data)")
-        #     plt.legend()
-        #     plt.show()
-
-        # # If you want to see the difference visually:
-        # compare_actions(price_series_test, dqn_actions, "DQN", sdp_actions, "SDP Heuristic")
-
-         # ------------------------------------------------
-            # If you want step-by-step date-based cumulative lines:
-            # (Only if you use the same dates from date_series_test)
-            # ------------------------------------------------
-            
-            # Evaluate DQN
-        dqn_dates, dqn_cum_profits, dqn_actions = evaluate_agent_cumulative(test_env, trained_agent, date_series_test)
-            
-            # Evaluate SDP
-        # sdp_env = CryptoEnvRL(price_series_test, volume_series_test)
-        # sdp_dates, sdp_cumprofits, sdp_step_actions = evaluate_sdp_cumulative(sdp_env, date_series_test)
-
-        sdp_model = CryptoSDPModel(price_series_test, volume_series_test)
-        sdp_dates, sdp_cum_profits, sdp_actions = evaluate_heuristic_sdp_cumulative(sdp_model, date_series_test)
-            
-            # Evaluate Simple
-        simp_env = CryptoEnvRL(price_series_test, volume_series_test)
-        simp_dates, simp_cumprofits, simp_step_actions = evaluate_simple_policy_cumulative(test_env, date_series_test)
-            
-            # Plot
-        plot_three_strategies(dqn_dates, dqn_cum_profits, sdp_cum_profits, simp_cumprofits)
+        # Plot three strategies
+        plot_three_strategies(
+            dqn_dates, dqn_cum_profits, 
+            sdp_cum_profits, 
+            simp_cumprofits
+        )
 
         def compare_actions(price_data, actions_dqn, label_dqn, actions_sdp, label_sdp):
             plt.figure(figsize=(12, 6))
@@ -353,13 +327,49 @@ if __name__ == "__main__":
             plt.legend()
             plt.show()
 
-        # If you want to see the difference visually:
+        # Compare actions visually
         compare_actions(price_series_test, dqn_actions, "DQN", sdp_actions, "SDP Heuristic")
     
-    run_tests_with_separate_plots(test_env, trained_agent, date_series_test)
+        results_df = pd.DataFrame({
+        "Algorithm": ["DQN", "SDP_HER", "Simple"],
+        "FinalProfit": [dqn_final, sdp_final, simple_final],
+        "SharpeRatio": [dqn_sharpe, sdp_sharpe, simple_sharpe],
+        "SolinoRatio": [dqn_solino, sdp_solino, simple_solino],
+        "MaxDrawdown": [dqn_mdd, sdp_mdd, simple_mdd],
+        "CalmarRatio": [dqn_calmar, sdp_calmar, simple_calmar],
+        "WinRate": [dqn_win_rate, sdp_win_rate, simple_win_rate],
+        "AvgTradeReturn": [dqn_avg_return, sdp_avg_return, simple_avg_return],
+        "Volatility": [dqn_vol, sdp_vol, simple_vol],
+        "PLR": [dqn_plr, sdp_plr, simple_plr],
+        })
+        results_df = results_df[["Algorithm", "FinalProfit", "SharpeRatio", "SolinoRatio","MaxDrawdown", "CalmarRatio", "WinRate", "AvgTradeReturn", "Volatility", "PLR"]]
+
+        print("\nComparison of DQN, SDP-Her, and Simple on Test Data:")
+        print(results_df)
+
+
+        results_d = pd.DataFrame({
+        "Algorithm": ["DQN", "SDP_HER", "Simple"],
+        "FinalProfit": [dqn_final, sdp_final, simple_final],
+        "SharpeRatio": [dqn_sharpe, sdp_sharpe, simple_sharpe],
+        "SolinoRatio": [dqn_solino, sdp_solino, simple_solino],
+        "WinRate": [dqn_win_rate, sdp_win_rate, simple_win_rate],
+        "AvgTradeReturn": [dqn_avg_return, sdp_avg_return, simple_avg_return],
+        "PLR": [dqn_plr, sdp_plr, simple_plr],
+        })
+        results_d = results_d[["Algorithm", "FinalProfit", "SharpeRatio", "SolinoRatio", "WinRate", "AvgTradeReturn", "PLR"]]
+
+        print("\nComparison of DQN, SDP-Her, and Simple :")
+        print(results_d)
+   
+    plot_equity_vs_buyhold(dqn_cum_profits, price_series_test, initial_cash=25000.0)
+    plot_drawdown(dqn_cum_profits)
+    plot_return_distribution(dqn_returns)
+    plot_trade_distribution(dqn_actions, dqn_returns)
+
 
     # ------------------------------------------------
-    # Plot the training rewards/losses as an animation
+    # Plot training rewards/losses as an animation
     # ------------------------------------------------
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
@@ -383,5 +393,5 @@ if __name__ == "__main__":
 
         plt.tight_layout()
 
-    ani = FuncAnimation(fig, update, frames=episodes, interval=250, repeat=False)
+    ani = FuncAnimation(fig, update, frames=episodes, interval=200, repeat=False)
     plt.show()

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from gym.spaces import Discrete, Box
 
 class CryptoEnvRL(Env):
-    def __init__(self, price_series, volume_series, asset_type="BTC", window_size=14):
+    def __init__(self, price_series, volume_series, asset_type="BTC", window_size=14, initial_cash=25000.0):
         super(CryptoEnvRL, self).__init__()
         self.price_series = price_series
         self.volume_series = volume_series
@@ -14,23 +14,24 @@ class CryptoEnvRL(Env):
 
         #self.symbol = symbol
 
-        self.state_size = 10  # State: RSI, SMA, Momentum, Volatility, Volume, Stock Owned, Buy Price, Current Price, VWAP
+        self.state_size = 11  # State: RSI, SMA, Momentum, Volatility, Price, Stock Owned, Buy Price, Current Price, VWAP, Cash
         self.action_space = Discrete(3)  # Actions: Buy (0), Hold (1), Sell (2)
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.state_size,), dtype=np.float32)
         self.last_action = None
 
 
         if asset_type == "BTC":
-            self.low_vol_threshold = 280
-            self.high_vol_threshold = 1740
-            self.rsi_oversold = 30
-            self.rsi_overbought = 70
+            self.low_vol_threshold = 200
+            self.high_vol_threshold = 1300
+            self.rsi_oversold = 40
+            self.rsi_overbought = 60
         elif asset_type == "ETH":
-            self.low_vol_threshold = 16
-            self.high_vol_threshold = 125
+            self.low_vol_threshold = 20
+            self.high_vol_threshold = 120
             self.rsi_oversold = 20
             self.rsi_overbought = 80
-
+        
+        self.initial_cash = initial_cash
         self.reset()
 
     def _calculate_indicators(self):
@@ -76,7 +77,7 @@ class CryptoEnvRL(Env):
 
         # Normalize Volume + Close Price
         self.volume_series = (volumes - np.mean(volumes)) / np.std(volumes)
-        # self.price_series = (prices - np.mean(prices)) / np.std(prices)
+        #self.price_series = (prices - np.mean(prices)) / np.std(prices)
 
     def exog_info_fn(self):
         """
@@ -107,6 +108,7 @@ class CryptoEnvRL(Env):
             self.buy_price,
             self.price_series[self.t],
             self.volume_series[self.t],
+            self.cash,
             self.vwap[self.t],        
             self.macd[self.t],      
         ], dtype=np.float32)
@@ -121,9 +123,12 @@ class CryptoEnvRL(Env):
         self.stock_owned = 0
         self.buy_price = 0
 
+        self.cash = self.initial_cash
+
         # Reset cumulative metrics
         self.total_reward = 0
         self.total_profit = 0
+       
 
         # Recalculate indicators (if necessary)
         self._calculate_indicators()
@@ -149,10 +154,10 @@ class CryptoEnvRL(Env):
         #         recent_trend = np.mean(self.price_series[self.t - 5:self.t]) - self.price_series[self.t - 6]
 
         # if self.last_action == action:
-        #     reward -= 0.10  # Penalize repeated actions 
+        #    reward -= 0.10  # Penalize repeated actions 
 
-        # #         # Save current action for the next step
-            # self.last_action = action
+        # # #         # Save current action for the next step
+        # self.last_action = action
         rsi = self.rsi[self.t]
         sma = self.sma[self.t]
         mom = self.momentum[self.t]
@@ -169,133 +174,84 @@ class CryptoEnvRL(Env):
         low_vol = (vol < self.low_vol_threshold)
         high_vol = (vol > self.high_vol_threshold)
 
-        # Optionally, if needed:
-        # Check if any are NaN, and handle them (we assume they're already cleaned in _get_observation).
-
-        # 2) Additional logic: a quick sense of "bullish" vs "bearish" conditions
-        #    (purely optional, you can skip if you want a simpler approach)
-
-        # # a) RSI < 30 = oversold, RSI > 70 = overbought
-        # oversold = (rsi < 30)
-        # overbought = (rsi > 70)
-
-        # # b) If price is below SMA => "maybe undervalued"
-        # #    If price is above SMA => "maybe overvalued"
-        # price_below_sma = (current_price < sma)
-
-        # # c) Momentum or MACD > 0 => bullish
-        # #    If negative => bearish
-        # bullish_momentum = (mom > 0)
-        # bullish_macd = (macd > 0)
-
-        # # d) Low volatility => more stable
-        # #    You might want to hold if it's stable or do more frequent trades.
-        # #    Let's define a small threshold for "low vol"
-        # low_vol_threshold = 0.05  # adjust to your data scale
-        # low_vol = (vol < low_vol_threshold)
-
-
-        # if action == 0:  # Buy
-        #     if self.stock_owned == 0:
-        #         self.stock_owned = 1
-        #         self.buy_price = current_price
-        #         # Reward signals for a "good" buy scenario:
-        #         # e.g., if RSI < 30 or price below SMA => presumably a good buy zone
-        #         if oversold or price_below_sma:
-        #             reward += 0.05
-        #         if bullish_momentum or bullish_macd:
-        #             reward += 0.05
-        #     else:
-        #         # invalid buy if we already hold
-        #         reward = -0.1
-
-        # elif action == 1:  # Hold
-        #     # small negative time penalty
-        #     reward = -0.05
-        #     # If momentum or MACD is bullish while we hold a stock, give a tiny reward
-        #     if self.stock_owned == 1:
-        #         if bullish_momentum or bullish_macd:
-        #             reward += 0.01
-        #         # If RSI crosses into overbought territory, a small nudge to consider selling
-        #         if overbought:
-        #             reward -= 0.02
-        #     else:
-        #         # If we hold no stock, maybe a slight penalty so we don't stay idle
-        #         reward -= 0.02
-
-        #     # Also consider volatility
-        #     # If we hold during low volatility, we add a tiny positive (less risk)
-        #     if low_vol:
-        #         reward += 0.01
-        #     else:
-        #         reward -= 0.01
-
-        # elif action == 2:  # Sell
-        #     if self.stock_owned == 1:
-        #         profit = current_price - self.buy_price
-        #         # The main reward is realized profit or loss
-        #         reward += profit
-
-        #         # If we sell in a "favorable" condition, small bonus:
-        #         # e.g. if RSI is now > 70 => we sold when overbought
-        #         if overbought:
-        #             reward += 0.02
-
-        #         # If the momentum or MACD is bullish, maybe we left some money on the table
-        #         # you could impose a small penalty or not:
-        #         if bullish_momentum or bullish_macd:
-        #             reward -= 0.01
-
-        #         # If profit is negative, amplify that penalty
-        #         if profit < 0:
-        #             reward += profit  # effectively doubling the negative
-        #         self.stock_owned = 0
-        #         self.buy_price = 0
-        #     else:
-        #         # invalid sell if we don't own stock
-        #         reward = -1  # invalid sell  
-
-
         if action == 0:  # Buy
             if self.stock_owned == 0:
-                self.stock_owned = 1
-                self.buy_price = current_price
-                if oversold or price_below_sma:
-                    reward += 0.05
-                if bullish_momentum or bullish_macd:
-                    reward += 0.05
+                if self.cash >= current_price:
+                    self.stock_owned = 1
+                    self.buy_price = current_price
+                    self.cash -= current_price  # deduct cost of 1 share
+
+                    if oversold or price_below_sma:
+                        reward += 0.05
+                    if bullish_momentum or bullish_macd:
+                        reward += 0.05
+                else:
+                    reward -= 0.5
             else:
                 reward = -1
 
         elif action == 1:  # Hold
             reward = -1
-
             if self.stock_owned and bullish_momentum:
                 reward += 0.01
 
             if low_vol:
-                reward += 0.01
+                reward += 0.02
             if high_vol:
-                reward -= 0.01
+                reward -= 0.05
 
         elif action == 2:  # Sell
             if self.stock_owned == 1:
                 profit = current_price - self.buy_price
                 reward += profit
+
+                self.cash += current_price
+                self.stock_owned = 0
+                self.buy_price = 0.0
+
                 if overbought:
                     reward += 0.02
                 if bullish_momentum or bullish_macd:
                     reward -= 0.01
-
-                self.stock_owned = 0
-                self.buy_price = 0
             else:
                 reward = -1
+        # if action == 0:  # Buy
+        #     if self.stock_owned == 0:
+        #         # Check if we have enough cash
+        #         if self.cash >= current_price:
+        #             self.stock_owned = 1
+        #             self.buy_price = current_price
+        #             self.cash -= current_price
+        #         else:
+        #             # Not enough cash
+        #             reward -= 1
+
+        # elif action == 1:  # Hold
+        #     reward -= 1  # or smaller/larger penalty if you like
+
+        # elif action == 2:  # Sell
+        #     if self.stock_owned == 1:
+        #         # Realize profit or loss
+        #         profit = current_price - self.buy_price
+        #         reward += profit
+        #         self.cash += current_price
+        #         self.stock_owned = 0
+        #         self.buy_price = 0.0
+        #     else:
+        #         reward -= 1 
             
-        reward = np.clip(reward, -100, 200)
+        reward = np.clip(reward, -50, 100)
 
         self.t += 1
         done = self.t >= len(self.price_series) - 1
         return self._get_observation(), reward, done, {}
+    
+    @property
+    def portfolio_value(self):
+        """
+        cash + (stock_owned * current_price).
+        """
+        current_price = self.price_series[self.t]
+        return self.cash + (self.stock_owned * current_price)
     
   

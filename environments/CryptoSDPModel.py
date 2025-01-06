@@ -3,7 +3,7 @@ import pandas as pd
 
 
 class CryptoSDPModel:
-    def __init__(self, price_series,volume_series):
+    def __init__(self, price_series,volume_series, initial_cash=25000.0):
         """
         Initialize the Sequential Decision Process (SDP) model for cryptocurrency trading.
 
@@ -19,6 +19,9 @@ class CryptoSDPModel:
         self.stock_owned = 0  # Whether stock is owned (0: No, 1: Yes)
         self.buy_price = 0  # The price at which the stock was bought
         self.total_reward = 0  # Cumulative reward
+
+        self.initial_cash = initial_cash
+        self.cash = initial_cash
 
         # Initialize exogenous data
         self.sma = self.calculate_sma(window=14)
@@ -143,6 +146,8 @@ class CryptoSDPModel:
         self.buy_price = 0
         self.total_reward = 0
 
+        self.cash = self.initial_cash
+
     def build_state(self):
         """
         Construct the state representation.
@@ -160,7 +165,8 @@ class CryptoSDPModel:
             self.macd[self.t],  
             self.stock_owned,  # Whether stock is owned
             self.buy_price,  # Price at which stock was bought
-            self.total_reward  # Cumulative reward
+            self.volume_series[self.t],
+            self.cash 
         ], dtype=np.float32)
 
     def exog_info_fn(self):
@@ -198,22 +204,31 @@ class CryptoSDPModel:
         current_price = self.price_series[self.t]
 
         if action == 0:  # Buy
-            if self.stock_owned == 0:  # Only buy if no stock is currently owned
-                self.stock_owned = 1
-                self.buy_price = current_price
+            if self.stock_owned == 0:
+                # Check if we have enough cash
+                if self.cash >= current_price:
+                    self.stock_owned = 1
+                    self.buy_price = current_price
+                    self.cash -= current_price
+                else:
+                    # Not enough cash to buy
+                    reward -= 0.5
             else:
-                reward = -0.05  # Penalty for trying to buy when stock is already owned
+                reward = -0.05
 
         elif action == 1:  # Hold
-            reward = -0.05  # Small penalty to discourage unnecessary holding
+            reward = -0.05
 
         elif action == 2:  # Sell
-            if self.stock_owned == 1:  # Can only sell if stock is owned
-                reward = current_price - self.buy_price  # Profit or loss from selling
+            if self.stock_owned == 1:
+                # Profit or loss from selling
+                trade_profit = (current_price - self.buy_price)
+                reward += trade_profit
+                self.cash += current_price
                 self.stock_owned = 0
-                self.buy_price = 0
+                self.buy_price = 0.0
             else:
-                reward = -1  # Heavy penalty for trying to sell without owning
+                reward = -1.0  # Heavy penalty for trying to sell without owning
 
         # Transition to the next time step
         self.t += 1
@@ -234,6 +249,18 @@ class CryptoSDPModel:
             float: Total reward achieved so far.
         """
         return self.total_reward
+    
+    @property
+    def portfolio_value(self):
+        """
+        If you want to check the total asset value at any time:
+        = self.cash + (self.stock_owned * current_price).
+        """
+        if self.t < len(self.price_series):
+            current_price = self.price_series[self.t]
+        else:
+            current_price = self.price_series[-1]
+        return self.cash + (self.stock_owned * current_price)
     
     # -------------------------------------------------------------------------------------------
 

@@ -1,86 +1,84 @@
+# test.py
 import torch
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import ttest_ind
-import random
 from collections import Counter
 
-
-from environments.CryptoEnvRL import CryptoEnvRL  
+from environments.CryptoEnvRL import CryptoEnvRL  # or your updated env file
 from models.RLAgent import DQNAgent
 from environments.CryptoSDPModel import CryptoSDPModel
 
 
-
 def evaluate_agent(env, agent, dates, print_qvals=False):
     """
-    Evaluate the agent on the given environment in a deterministic (greedy) way.
-
+    Evaluate the agent on the given environment in a deterministic (epsilon=0) way.
     Args:
-        env (gym.Env): Instance of the CryptoEnvRL or similar environment.
-        agent (DQNAgent): The trained agent with a .model that produces Q-values.
-        print_qvals (bool): If True, will print Q-values at each step for debugging.
-
+        env (CryptoEnvRL): The environment instance (already loaded with test data).
+        agent (DQNAgent): The trained DQN agent.
+        dates (pd.DatetimeIndex): For plotting or reference.
+        print_qvals (bool): If True, will print Q-values each step for debugging.
     Returns:
-        total_reward (float): Sum of all rewards obtained by the agent.
-        actions_taken (list): List of actions (0=Buy, 1=Hold, 2=Sell) taken at each step.
-        rewards (list): List of step-by-step rewards obtained by the agent.
+        total_reward (float): Sum of all rewards obtained.
+        actions_taken (list): The actions at each step (0=Buy,1=Hold,2=Sell).
+        rewards (list): The step-by-step rewards.
     """
-    # Reset the environment to start
     state = env.reset()
-    
-    # Force the agent to exploit (set epsilon=0), just to be safe
-    # (Alternatively, rely on your agent.act(..., train=False) to bypass exploration.)
-    old_epsilon = agent.epsilon  # Store the current epsilon
-    agent.epsilon = 0.0          # Turn  exploration
-    dates_list = []
+    old_epsilon = agent.epsilon
+    agent.epsilon = 0.0  # Force greedy (no exploration)
+
     done = False
+    step = 0
     total_reward = 0.0
     actions_taken = []
+    rewards_list = []
+    dates_list = []
 
-    step = 0
-    
     while not done:
-        # Optionally debug: Check Q-values
         if print_qvals:
             with torch.no_grad():
-                q_vals = agent.model(torch.FloatTensor(state).unsqueeze(0).to(agent.device))
-            # Argmax is the chosen action
+                q_vals = agent.model(
+                    torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+                )
             action = np.argmax(q_vals.cpu().numpy())
-            print(f"Step={step:4d}, Q-vals={q_vals.cpu().numpy()}, Action={action}")
+            print(f"Step={step}, Q-vals={q_vals.cpu().numpy()}, Action={action}")
         else:
-            # Evaluate policy in a purely greedy way
             action = agent.act(state, train=False)
-        
-        # Step the environment
+
         next_state, reward, done, _ = env.step(action)
-        
+
         total_reward += reward
         actions_taken.append(action)
-        dates_list.append(dates[step])
+        rewards_list.append(reward)
+        if step < len(dates):
+            dates_list.append(dates[step])
 
-        # Move to the next state
         state = next_state
         step += 1
-    
-    # Restore agent's original epsilon
-    agent.epsilon = old_epsilon
-    
-    return  dates_list, total_reward, actions_taken
+
+    agent.epsilon = old_epsilon  # restore
+    return total_reward, actions_taken, rewards_list
+
 
 def evaluate_agent_cumulative(env, agent, dates):
     """
-    Step-by-step evaluation: (dates_list, cum_profits, actions).
+    Similar to the above, but we store cumulative profits step by step.
+    For an environment that accumulates reward for each trade,
+    we can define 'cum_profit' as sum of step rewards.
+    Returns:
+        (dates_list, cum_profits, actions_list)
     """
     state = env.reset()
+    old_epsilon = agent.epsilon
+    agent.epsilon = 0.0
+
     done = False
     step = 0
     cum_profit = 0.0
 
-    old_epsilon = agent.epsilon  # Store the current epsilon
-    agent.epsilon = 0.1 
+    successful_trades = 0
+    unsuccessful_trades = 0
 
     dates_list = []
     cum_profits = []
@@ -91,34 +89,79 @@ def evaluate_agent_cumulative(env, agent, dates):
         next_state, reward, done, _ = env.step(action)
         cum_profit += reward
 
-        dates_list.append(dates[step])
+        if action == 2: 
+            if reward > 0:
+                successful_trades += 1
+            elif reward < 0:
+                unsuccessful_trades += 1
+
+        if step < len(dates):
+            dates_list.append(dates[step])
         cum_profits.append(cum_profit)
         actions_list.append(action)
 
         step += 1
         state = next_state
-    
-    # Restore agent's original epsilon
+
     agent.epsilon = old_epsilon
 
-    return dates_list, cum_profits, actions_list
+    plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades + unsuccessful_trades) > 0 else 0
+
+    return dates_list, cum_profits, actions_list, plr
+
+
+def evaluate_agent_cumulative_with_portfolio(env, agent, dates):
+    """
+    Evaluate the agent step-by-step, returning both 'cum_profits' and 'portfolio_values'.
+    Since your environment has env.portfolio_value, we can track it directly.
+    Returns:
+        (dates_list, cum_rewards, portfolio_values, actions_list)
+    """
+    state = env.reset()
+    old_epsilon = agent.epsilon
+    agent.epsilon = 0.0
+
+    done = False
+    step = 0
+    cum_reward = 0.0
+
+
+    dates_list = []
+    cum_rewards = []
+    portfolio_values = []
+    actions_list = []
+
+    while not done:
+        action = agent.act(state, train=False)
+        next_state, reward, done, _ = env.step(action)
+        cum_reward += reward
+        current_portfolio = env.portfolio_value  # see environment's property
+
+        if step < len(dates):
+            dates_list.append(dates[step])
+        cum_rewards.append(cum_reward)
+        portfolio_values.append(current_portfolio)
+        actions_list.append(action)
+
+        step += 1
+        state = next_state
+
+    agent.epsilon = old_epsilon
+    return dates_list, cum_rewards, portfolio_values, actions_list
 
 def evaluate_heuristic_sdp_cumulative(sdp_model, dates):
     """
-    Evaluate the CryptoSDPModel with the advanced heuristic policy, 
-    tracking cumulative profits and actions over time.
-
-    Args:
-        sdp_model (CryptoSDPModel): The SDP model instance.
-        dates (pd.DatetimeIndex): Corresponding dates for the test series.
-
-    Returns:
-        tuple: (dates_list, cum_profits, actions_list)
+    Evaluate the CryptoSDPModel with advanced_heuristic_policy_sdp (or your custom policy).
+    Returns (dates_list, cum_profits, actions_list).
+    We won't track 'portfolio_value' here unless you add a 'cash' logic to your SDP model.
     """
     sdp_model.reset()
     done = False
     step = 0
     cum_profit = 0.0
+
+    successful_trades = 0
+    unsuccessful_trades = 0
 
     dates_list = []
     cum_profits = []
@@ -126,32 +169,41 @@ def evaluate_heuristic_sdp_cumulative(sdp_model, dates):
 
     while not done:
         info = sdp_model.exog_info_fn()
-        rsi = info["rsi"]
         current_price = sdp_model.price_series[sdp_model.t]
 
-        if rsi < 40 and current_price < info["sma"]:
+        # Basic heuristic
+        if (info["rsi"] < 40) and (current_price < info["sma"]):
             action = 0  # Buy
-        elif rsi > 60 or current_price > info["sma"] * 1.05:
+        elif (info["rsi"] > 60) or (current_price > info["sma"] * 1.05):
             action = 2  # Sell
         else:
             action = 1  # Hold
 
-        _, reward, done = sdp_model.transition_fn(action)
+        next_state, reward, done = sdp_model.transition_fn(action)
         cum_profit += reward
 
-        dates_list.append(dates[step])
+        if action == 2: 
+            if reward > 0:
+                successful_trades += 1
+            elif reward < 0:
+                unsuccessful_trades += 1
+
+        if step < len(dates):
+            dates_list.append(dates[step])
         cum_profits.append(cum_profit)
         actions_list.append(action)
 
         step += 1
+    
+    plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades + unsuccessful_trades) > 0 else 0
 
-    return dates_list, cum_profits, actions_list
+    return dates_list, cum_profits, actions_list, plr
 
 
 def evaluate_simple_policy_cumulative(env, dates):
     """
-    Simple policy: buy if price < mean, else sell if price>mean, else hold.
-    Step-by-step to gather (date, cum_profit).
+    A naive policy: buy if price<mean, else sell if price>mean, else hold.
+    Tracks cumulative profit the same way as evaluate_agent_cumulative does.
     """
     price_arr = env.price_series
     mean_price = np.mean(price_arr)
@@ -161,6 +213,9 @@ def evaluate_simple_policy_cumulative(env, dates):
     step = 0
     cum_profit = 0.0
 
+    successful_trades = 0
+    unsuccessful_trades = 0
+
     dates_list = []
     cum_profits = []
     actions_list = []
@@ -168,238 +223,351 @@ def evaluate_simple_policy_cumulative(env, dates):
     while not done:
         current_price = price_arr[env.t]
         if current_price < mean_price:
-            action = 0  # buy
+            action = 0  # Buy
         elif current_price > mean_price:
-            action = 2  # sell
+            action = 2  # Sell
         else:
-            action = 1  # hold
+            action = 1  # Hold
 
-        _, reward, done, _ = env.step(action)
+        next_state, reward, done, _ = env.step(action)
         cum_profit += reward
 
-        dates_list.append(dates[step])
+        if action == 2: 
+            if reward > 0:
+                successful_trades += 1
+            elif reward < 0:
+                unsuccessful_trades += 1
+
+        if step < len(dates):
+            dates_list.append(dates[step])
         cum_profits.append(cum_profit)
         actions_list.append(action)
 
         step += 1
+    
+    plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades + unsuccessful_trades) > 0 else 0
 
-    return dates_list, cum_profits, actions_list
+    return dates_list, cum_profits, actions_list, plr
+
 
 def plot_three_strategies(dqn_dates, dqn_cum, sdp_cum, simple_cum):
     """
-    Plot 3 lines: DQN, SDP, Simple on the same date-based x-axis.
+    Plot 3 lines: DQN, SDP_Heuristic, Simple. Each is a cumulative profit curve vs. time.
     """
     plt.figure(figsize=(12, 6))
     plt.plot(dqn_dates, dqn_cum, label='DQN', color='blue')
-    plt.plot(dqn_dates, sdp_cum, label='HER', color='orange')
+    plt.plot(dqn_dates, sdp_cum, label='SDP', color='orange')
     plt.plot(dqn_dates, simple_cum, label='Simple', color='green')
     plt.xlabel('Date')
     plt.ylabel('Cumulative Profit')
-    plt.title(f"Compare: DQN vs. HER vs. Simple ")
+    plt.title("Comparison: DQN vs SDP vs Simple")
     plt.legend()
     plt.show()
 
 
 def simple_policy(price_series):
-    """Simple trading policy based on mean price."""
-    # Ensure the input is valid
-    assert len(price_series) > 0, "Price series is empty!"
-    assert not np.isnan(price_series).any(), "Price series contains NaN values!"
-
     mean_price = np.mean(price_series)
-    print(f"Simple Policy Mean Price: {mean_price}")
-
-    actions = [0 if price < mean_price else 2 if price > mean_price else 1 for price in price_series]
-    print(f"Simple Policy Actions Distribution: {Counter(actions)}")
+    actions = []
+    for price in price_series:
+        if price < mean_price:
+            actions.append(0)  # Buy
+        elif price > mean_price:
+            actions.append(2)  # Sell
+        else:
+            actions.append(1)  # Hold
     return actions
 
 
-def plot_results(price_series, actions_trained, actions_simple, title1="Trained Agent Actions", title2="Simple Policy Actions"):
-    """Plot the results of the trained agent and the simple policy."""
-    plt.figure(figsize=(20, 10))
-
-    # Plot for trained agent
-    plt.subplot(1, 2, 1)
-    plt.plot(price_series, label='Price', color='gray')
-    buy_signals_trained = [i for i, a in enumerate(actions_trained) if int(a) == 0]
-    sell_signals_trained = [i for i, a in enumerate(actions_trained) if int(a) == 2]
-    plt.scatter(buy_signals_trained, [price_series[i] for i in buy_signals_trained], color='green', marker='^', label='Buy')
-    plt.scatter(sell_signals_trained, [price_series[i] for i in sell_signals_trained], color='red', marker='v', label='Sell')
-    plt.title(title1)
+def plot_portfolio_value(time_steps, portfolio_values, title="Portfolio Value Over Time"):
+    """
+    Plot a single line of portfolio values vs time steps.
+    """
+    plt.figure(figsize=(10, 5))
+    plt.plot(time_steps, portfolio_values, label='Portfolio Value', color='blue')
+    plt.title(title)
+    plt.xlabel("Time Step")
+    plt.ylabel("Value")
+    plt.grid(True)
     plt.legend()
-
-    # Plot for simple policy
-    plt.subplot(1, 2, 2)
-    plt.plot(price_series, label='Price', color='gray')
-    buy_signals_simple = [i for i, a in enumerate(actions_simple) if a == 0]
-    sell_signals_simple = [i for i, a in enumerate(actions_simple) if a == 2]
-    plt.scatter(buy_signals_simple, [price_series[i] for i in buy_signals_simple], color='green', marker='^', label='Buy')
-    plt.scatter(sell_signals_simple, [price_series[i] for i in sell_signals_simple], color='red', marker='v', label='Sell')
-    plt.title(title2)
-    plt.legend()
-
     plt.show()
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 
 def analyze_rolling_std(price_series, window=14):
     """
-    Analyze rolling standard deviation (volatility) of price series.
-    
-    Args:
-        price_series (np.ndarray): Array of price values.
-        window (int): Rolling window size for calculating standard deviation.
-
-    Returns:
-        None (Displays histogram and line plot of rolling std)
+    Plot the rolling std for price_series and a histogram, to see volatility distribution.
     """
-    # Convert to pandas Series for convenience
     price_series = pd.Series(price_series)
-    
-    # Calculate rolling standard deviation
     rolling_std = price_series.rolling(window=window).std()
-    
-    # Plot rolling standard deviation over time
+
     plt.figure(figsize=(12, 6))
     plt.plot(rolling_std, label='Rolling Std (Volatility)', color='blue')
-    plt.title(f'Rolling Standard Deviation of Prices (Window = {window})')
+    plt.title(f'Rolling Standard Deviation (Window={window})')
     plt.xlabel('Time')
-    plt.ylabel('Standard Deviation')
+    plt.ylabel('Std')
     plt.legend()
     plt.grid()
     plt.show()
-    
-    # Plot histogram of rolling standard deviation
+
     plt.figure(figsize=(8, 6))
     plt.hist(rolling_std.dropna(), bins=30, color='skyblue', edgecolor='black')
-    plt.title(f'Histogram of Rolling Std (Window = {window})')
+    plt.title(f'Histogram of Rolling Std (Window={window})')
     plt.xlabel('Rolling Std')
     plt.ylabel('Frequency')
     plt.grid()
     plt.show()
-    
-    # Print percentiles to guide threshold selection
-    percentiles = [10, 25, 50, 75, 90]
-    for p in percentiles:
-        print(f"{p}th Percentile: {np.percentile(rolling_std.dropna(), p):.4f}")
-   
-def evaluate_agent_cumulative_with_portfolio(env, agent, dates):
-    """
-    Evaluate the agent step-by-step, returning cumulative profits and portfolio values.
 
-    Args:
-        env (CryptoEnvRL): Trading environment.
-        agent (DQNAgent): Trained DQN agent.
-        dates (pd.DatetimeIndex): Date series for visualization.
+    # Print some percentiles
+    for p in [10, 25, 50, 75, 90]:
+        val = np.percentile(rolling_std.dropna(), p)
+        print(f"{p}th Percentile = {val:.4f}")
 
-    Returns:
-        tuple: (dates_list, cum_profits, portfolio_values, actions_list)
+
+def calculate_sharpe_ratio(returns, risk_free_rate=0.01):
     """
-    state = env.reset()
+    Sharpe Ratio = (mean(returns - r_f)) / std(returns).
+    If there's no variability or too few data points, returns 0.0
+    """
+    returns_arr = np.array(returns)
+    if len(returns_arr) < 2:
+        return 0.0
+    excess = returns_arr - risk_free_rate
+    if excess.std() == 0:
+        return 0.0
+    return excess.mean() / excess.std()
+
+def calculate_sortino_ratio(returns, risk_free_rate=0.01):
+    """
+    Sortino Ratio = (mean(returns - r_f)) / std(negative excess returns)
+
+    returns (list or np.array): Step or daily returns.
+    risk_free_rate (float): risk-free rate.
+    """
+    arr = np.array(returns)
+    if len(arr) < 2:
+        return 0.0
+
+    excess = arr - risk_free_rate
+    # Only negative returns matter for the denominator
+    downside = excess[excess < 0]
+
+    mean_excess = excess.mean()
+    if len(downside) < 1:
+        # If no negative returns, the ratio is effectively infinite
+        return float('inf')
+
+    # Downside volatility
+    downside_std = downside.std()
+    if downside_std == 0:
+        # If no negative deviation, ratio is infinite
+        return float('inf')
+
+    sortino = mean_excess / downside_std
+    return sortino
+
+def calculate_max_drawdown(equity_curve):
+    """
+    Calculates the maximum drawdown for a given equity curve (list or array).
+    equity_curve: array-like of portfolio or cumulative profit over time
+
+    Returns: float (max drawdown as a positive fraction), e.g. 0.30 means 30% drawdown
+    """
+    arr = np.array(equity_curve)
+    if len(arr) < 2:
+        return 0.0
+
+    peak = arr[0]
+    max_dd = 0.0
+    for x in arr:
+        peak = max(peak, x)
+        dd = (peak - x) / peak
+        max_dd = max(max_dd, dd)
+    return max_dd  # e.g. 0.25 => 25% drop from peak
+
+def calculate_calmar_ratio(equity_curve, periods_per_year=365):
+    """
+    Calmar Ratio = (annualized return) / (max drawdown)
+
+    equity_curve: array-like of portfolio values
+    periods_per_year: e.g. 365 if daily, 252 if trading days in a year, etc.
+    """
+    max_dd = calculate_max_drawdown(equity_curve)
+    if max_dd == 0:
+        return float('inf')
+
+    start_val = equity_curve[0]
+    end_val = equity_curve[-1]
+    n = len(equity_curve)
+    # approximate # of years
+    years = n / float(periods_per_year)
+    # if years < 1.0 => we just annualize anyway
+    if start_val <= 0:
+        return 0.0
+
+    total_return = (end_val / start_val) - 1.0
+    # annualized return (geometric)
+    annual_return = (1 + total_return)**(1/years) - 1 if years > 0 else 0
+
+    return annual_return / max_dd
+
+def calculate_trade_stats(actions, rewards):
+    """
+    actions: list of actions (0=Buy,1=Hold,2=Sell)
+    rewards: the step-level reward at each step
+    returns: (win_rate, avg_trade_return)
+    """
+    trade_profits = []
+    for a, r in zip(actions, rewards):
+        if a == 2:  # Sell
+            trade_profits.append(r)  # the environment's reward on Sell is the trade's P/L
+
+    if len(trade_profits) == 0:
+        return 0.0, 0.0  # no sells
+
+    wins = sum(1 for p in trade_profits if p > 0)
+    total = len(trade_profits)
+    win_rate = wins / total
+    avg_return = np.mean(trade_profits)
+    return win_rate, avg_return
+
+def stability_of_returns(returns, threshold=0.02):
+    """
+    Returns the fraction of steps that have a 'large' absolute return 
+    bigger than the threshold (e.g. 2%).
+    The lower this fraction, the more 'stable' the returns.
+    """
+    arr = np.array(returns)
+    if len(arr) < 1:
+        return 1.0
+    big_moves = sum(1 for r in arr if abs(r) > threshold)
+    fraction_big_moves = big_moves / len(arr)
+    # If you want "stability index," maybe 1 - fraction_big_moves
+    return 1 - fraction_big_moves
+
+def plot_equity_vs_buyhold(portfolio_vals, price_series, initial_cash=25000.0):
+    """
+    Compare your RL portfolio to a naive buy-and-hold strategy on the same asset.
+    portfolio_vals: array of your strategy's portfolio values
+    price_series: array of the asset's price
+    """
+    # Buy-hold: how many shares if you spent all cash at t=0
+    first_price = price_series[0]
+    shares_bought = initial_cash / first_price
+    bh_curve = shares_bought * price_series
+
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(12,6))
+    plt.plot(portfolio_vals, label='RL Strategy', color='blue')
+    plt.plot(bh_curve, label='Buy-and-Hold', color='orange')
+    plt.title("Equity Curve vs. Buy & Hold")
+    plt.xlabel("Time Steps")
+    plt.ylabel("Portfolio Value")
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+
+def plot_drawdown(equity_vals):
+    """
+    Plot drawdown over time. equity_vals is array-like of the portfolio or equity curve.
+    """
+    arr = np.array(equity_vals)
+    peak = arr[0]
+    drawdowns = []
+    for x in arr:
+        peak = max(peak, x)
+        dd = (peak - x) / peak
+        drawdowns.append(dd)
+
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(12,6))
+    plt.plot(drawdowns, color='red', label='Drawdown')
+    plt.title("Drawdown Over Time")
+    plt.xlabel("Time Steps")
+    plt.ylabel("Drawdown (fraction)")
+    plt.grid()
+    plt.legend()
+    plt.show()
+
+
+def plot_return_distribution(returns):
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(8,6))
+    plt.hist(returns, bins=30, color='skyblue', edgecolor='black')
+    plt.title("Distribution of Step (or Daily) Returns")
+    plt.xlabel("Return")
+    plt.ylabel("Frequency")
+    plt.grid(True)
+    plt.show()
+
+
+def plot_trade_distribution(actions, rewards):
+    """
+    For each Sell, reward is the trade P/L. 
+    Plot distribution of trade P/L and show the number of trades.
+    """
+    trade_pl = []
+    for a, r in zip(actions, rewards):
+        if a == 2:  # Sell
+            trade_pl.append(r)
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(8,6))
+    plt.hist(trade_pl, bins=30, color='lightgreen', edgecolor='black')
+    plt.title(f"Distribution of Trade P/L (Total Trades={len(trade_pl)})")
+    plt.xlabel("Trade Profit/Loss")
+    plt.ylabel("Frequency")
+    plt.grid(True)
+    plt.show()
+
+
+def evaluate_portfolio_on_training_data(env, agent):
+    """
+    After training, run a purely greedy pass on the SAME training environment
+    from the start, collecting the portfolio value at each step.
+    Returns (time_steps, portfolio_values).
+    """
+    old_epsilon = agent.epsilon
+    agent.epsilon = 0.0
+
+    obs = env.reset()
     done = False
-    step = 0
-    cum_profit = 0.0
-    portfolio_value = 0.0
+    step_count = 0
 
-    old_epsilon = agent.epsilon  # Store the current epsilon
-    agent.epsilon = 0.0  # Pure exploitation during testing
-
-    dates_list = []
-    cum_profits = []
+    time_steps = []
     portfolio_values = []
-    actions_list = []
 
     while not done:
-        action = agent.act(state, train=False)
-        next_state, reward, done, _ = env.step(action)
-        cum_profit += reward
-        portfolio_value = (env.stock_owned * env.price_series[env.t]) + cum_profit
+        action = agent.act(obs, train=False)
+        next_obs, reward, done, _ = env.step(action)
 
-        dates_list.append(dates[step])
-        cum_profits.append(cum_profit)
-        portfolio_values.append(portfolio_value)
-        actions_list.append(action)
+        portfolio_values.append(env.portfolio_value)
+        time_steps.append(step_count)
 
-        step += 1
-        state = next_state
+        step_count += 1
+        obs = next_obs
 
-    # Restore agent's original epsilon
     agent.epsilon = old_epsilon
+    return time_steps, portfolio_values
 
-    return dates_list, cum_profits, portfolio_values, actions_list
-
-
-def plot_cumulative_profit(dates, total_reward, title="Cumulative Profit Over Time"):
-    """
-    Plot cumulative profits over time.
-    """
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates, total_reward, label='Cumulative Profit', color='blue')
-    plt.xlabel('Date')
-    plt.ylabel('Cumulative Profit')
-    plt.title(title)
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-
-def plot_portfolio_value(dates, portfolio_values, title="Portfolio Value Over Time"):
-    """
-    Plot portfolio value over time.
-    """
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates, portfolio_values, label='Portfolio Value', color='orange')
-    plt.xlabel('Date')
-    plt.ylabel('Portfolio Value')
-    plt.title(title)
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-
-def run_tests_with_separate_plots(test_env, trained_agent, date_series):
-    """
-    Run tests on the trained agent and display separate plots for cumulative profit and portfolio value.
-    """
-    # Evaluate trained agent with cumulative profits and portfolio values
-    dqn_dates, dqn_cum_profits, dqn_portfolio_values, dqn_actions = evaluate_agent_cumulative_with_portfolio(
-        test_env, trained_agent, date_series
-    )
-    print(f"DQN Total Reward: {dqn_cum_profits[-1]:.2f}")
-    print(f"DQN Actions Distribution: {Counter(dqn_actions)}")
-
-    # Plot cumulative profits
-    plot_cumulative_profit(dqn_dates, dqn_cum_profits, title="DQN: Cumulative Profit Over Time")
-
-    # Plot portfolio value
-    plot_portfolio_value(dqn_dates, dqn_portfolio_values, title="DQN: Portfolio Value Over Time")
-
-
-def calculate_metrics(rewards, actions):
-    cumulative_return = np.sum(rewards)
-    returns = np.array(rewards)
-    if np.std(returns) != 0:
-        sharpe_ratio = np.mean(returns) / np.std(returns)
-    else:
-        sharpe_ratio = 0
-    return cumulative_return, sharpe_ratio
 
 def run_tests(test_env, trained_agent, date_series):
-    """Run tests on the trained agent and compare with a simple policy."""
+    """
+    Example test harness that runs the agent, prints total reward, 
+    plus distributions of actions, then maybe calls other policies, etc.
+    """
     # Evaluate trained agent
-    dqn_dates, dqn_cum_profits, dqn_actions = evaluate_agent_cumulative(test_env, trained_agent, date_series)
-    print(f"DQN Total Reward: {dqn_cum_profits[-1]:.2f}")
-    print(f"DQN Actions Distribution: {Counter(dqn_actions)}")
+    # We'll do a step-by-step cumulative approach:
+    dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr = evaluate_agent_cumulative(test_env, trained_agent, date_series)
+    total_reward = dqn_cum_profits[-1] if len(dqn_cum_profits) > 0 else 0
+    print(f"DQN Total Reward (final cum profit) = {total_reward:.2f}")
+    print(f"DQN Action Distribution = {Counter(dqn_actions)}")
 
-    # Evaluate SDP Heuristic
     sdp_model = CryptoSDPModel(test_env.price_series, test_env.volume_series)
-    sdp_dates, sdp_cum_profits, sdp_actions = evaluate_heuristic_sdp_cumulative(sdp_model, date_series)
+    sdp_dates, sdp_cum_profits, sdp_actions,sdp_plr = evaluate_heuristic_sdp_cumulative(sdp_model, date_series)
     print(f"SDP Total Reward: {sdp_cum_profits[-1]:.2f}")
     print(f"SDP Actions Distribution: {Counter(sdp_actions)}")
 
     # Evaluate Simple Policy
-    simp_dates, simp_cumprofits, simp_step_actions = evaluate_simple_policy_cumulative(test_env, date_series)
+    simp_dates, simp_cumprofits, simp_step_actions,simple_plr = evaluate_simple_policy_cumulative(test_env, date_series)
     print(f"Simple Policy Total Reward: {simp_cumprofits[-1]:.2f}")
     print(f"Simple Policy Actions Distribution: {Counter(simp_step_actions)}")
