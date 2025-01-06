@@ -10,6 +10,7 @@ from environments.CryptoEnvRL import CryptoEnvRL
 from models.RLAgent import DQNAgent
 from collections import Counter, deque
 from test import run_tests
+from utils import evaluate_agent
 
 
 from test import (
@@ -65,21 +66,21 @@ def load_data(folder, cryptocurrencies):
     return data
 
 if __name__ == "__main__":
-    # 1) Load cryptocurrency data
+    # Loading cryptocurrency data
     folder = "data"
-    cryptocurrencies = ["BTC-USD"]
+    cryptocurrencies = ["BTC-USD","ETH-USD"]
     data = load_data(folder, cryptocurrencies)
 
-    # 2) Training parameters
-    episodes = 15
-    batch_size = 64
+    # Training parameters
+    episodes = 30
+    batch_size = 32
 
-    # 3) Lists for tracking
+    # Lists for tracking
     episode_rewards = []    # total rewards per episode
     training_losses = []    # average training loss per episode
     action_counts = Counter()
 
-    # 4) Loop over each symbol's train/test
+    # Loop over each symbol's train and test sets
     for symbol, (train_data, test_data) in data.items():
         print(f"\n--- Training RL agent on {symbol} ---")
 
@@ -244,6 +245,7 @@ if __name__ == "__main__":
         # ------------------------------------------------
         from test import run_tests
         run_tests(test_env, trained_agent, date_series_test)
+        evaluate_agent(env, agent, episodes=30)
 
         analyze_rolling_std(price_series_test)
 

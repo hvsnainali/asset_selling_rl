@@ -11,14 +11,10 @@ class CryptoEnvRL(Env):
         self.volume_series = volume_series
         self.asset_type = asset_type  # BTC or ETH
         self.window_size = window_size 
-
-        #self.symbol = symbol
-
         self.state_size = 11  # State: RSI, SMA, Momentum, Volatility, Price, Stock Owned, Buy Price, Current Price, VWAP, Cash
         self.action_space = Discrete(3)  # Actions: Buy (0), Hold (1), Sell (2)
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.state_size,), dtype=np.float32)
         self.last_action = None
-
 
         if asset_type == "BTC":
             self.low_vol_threshold = 200
