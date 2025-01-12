@@ -3,7 +3,7 @@ import pandas as pd
 
 
 class CryptoSDPModel:
-    def __init__(self, price_series,volume_series, initial_cash=25000.0):
+    def __init__(self, price_series,volume_series, initial_cash=30000.0):
         """
         Initialize the Sequential Decision Process (SDP) model for cryptocurrency trading.
 

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from gym.spaces import Discrete, Box
 
 class CryptoEnvRL(Env):
-    def __init__(self, price_series, volume_series, asset_type="BTC", window_size=14, initial_cash=25000.0):
+    def __init__(self, price_series, volume_series, asset_type="BTC", window_size=14, initial_cash=30000.0):
         super(CryptoEnvRL, self).__init__()
         self.price_series = price_series
         self.volume_series = volume_series
@@ -18,12 +18,12 @@ class CryptoEnvRL(Env):
 
         if asset_type == "BTC":
             self.low_vol_threshold = 200
-            self.high_vol_threshold = 1300
+            self.high_vol_threshold = 1350
             self.rsi_oversold = 40
             self.rsi_overbought = 60
         elif asset_type == "ETH":
-            self.low_vol_threshold = 20
-            self.high_vol_threshold = 120
+            self.low_vol_threshold = 30
+            self.high_vol_threshold = 125
             self.rsi_oversold = 20
             self.rsi_overbought = 80
         

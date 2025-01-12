@@ -83,11 +83,13 @@ def evaluate_agent_cumulative(env, agent, dates):
     dates_list = []
     cum_profits = []
     actions_list = []
+    step_rewards = []
 
     while not done:
         action = agent.act(state, train=False)
         next_state, reward, done, _ = env.step(action)
         cum_profit += reward
+        step_rewards.append(reward)
 
         if action == 2: 
             if reward > 0:
@@ -107,7 +109,15 @@ def evaluate_agent_cumulative(env, agent, dates):
 
     plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades + unsuccessful_trades) > 0 else 0
 
-    return dates_list, cum_profits, actions_list, plr
+    print(f"[DEBUG] Step: {step}, Action: {action}, Reward: {reward}, Cum Profit: {cum_profit}")
+    print(f"[DEBUG] Successful Trades: {successful_trades}, Unsuccessful Trades: {unsuccessful_trades}")
+    
+    
+    if successful_trades + unsuccessful_trades == 0:
+        print("[DEBUG] No trades executed during evaluation.")
+
+
+    return dates_list, cum_profits, actions_list, plr, step_rewards
 
 
 def evaluate_agent_cumulative_with_portfolio(env, agent, dates):
@@ -166,6 +176,7 @@ def evaluate_heuristic_sdp_cumulative(sdp_model, dates):
     dates_list = []
     cum_profits = []
     actions_list = []
+    step_rewards = []
 
     while not done:
         info = sdp_model.exog_info_fn()
@@ -181,6 +192,7 @@ def evaluate_heuristic_sdp_cumulative(sdp_model, dates):
 
         next_state, reward, done = sdp_model.transition_fn(action)
         cum_profit += reward
+        step_rewards.append(reward)
 
         if action == 2: 
             if reward > 0:
@@ -190,6 +202,7 @@ def evaluate_heuristic_sdp_cumulative(sdp_model, dates):
 
         if step < len(dates):
             dates_list.append(dates[step])
+       
         cum_profits.append(cum_profit)
         actions_list.append(action)
 
@@ -197,7 +210,12 @@ def evaluate_heuristic_sdp_cumulative(sdp_model, dates):
     
     plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades + unsuccessful_trades) > 0 else 0
 
-    return dates_list, cum_profits, actions_list, plr
+    print(f"[DEBUG] SDP Successful Trades: {successful_trades}, SDP Unsuccessful Trades: {unsuccessful_trades}")
+
+    if successful_trades + unsuccessful_trades == 0:
+        print("[DEBUG] No trades executed during evaluation for SDP.")
+
+    return dates_list, cum_profits, actions_list, plr,step_rewards
 
 
 def evaluate_simple_policy_cumulative(env, dates):
@@ -219,6 +237,7 @@ def evaluate_simple_policy_cumulative(env, dates):
     dates_list = []
     cum_profits = []
     actions_list = []
+    step_rewards = []
 
     while not done:
         current_price = price_arr[env.t]
@@ -231,6 +250,7 @@ def evaluate_simple_policy_cumulative(env, dates):
 
         next_state, reward, done, _ = env.step(action)
         cum_profit += reward
+        step_rewards.append(reward)
 
         if action == 2: 
             if reward > 0:
@@ -240,6 +260,7 @@ def evaluate_simple_policy_cumulative(env, dates):
 
         if step < len(dates):
             dates_list.append(dates[step])
+
         cum_profits.append(cum_profit)
         actions_list.append(action)
 
@@ -247,7 +268,12 @@ def evaluate_simple_policy_cumulative(env, dates):
     
     plr = successful_trades / (successful_trades + unsuccessful_trades) if (successful_trades + unsuccessful_trades) > 0 else 0
 
-    return dates_list, cum_profits, actions_list, plr
+    print(f"[DEBUG] SIMPLE Successful Trades: {successful_trades}, SIMPLE Unsuccessful Trades: {unsuccessful_trades}")
+
+    if successful_trades + unsuccessful_trades == 0:
+        print("[DEBUG] No trades executed during evaluation for Simple.")
+
+    return dates_list, cum_profits, actions_list, plr, step_rewards
 
 
 def plot_three_strategies(dqn_dates, dqn_cum, sdp_cum, simple_cum):
@@ -381,7 +407,7 @@ def calculate_max_drawdown(equity_curve):
         peak = max(peak, x)
         dd = (peak - x) / peak
         max_dd = max(max_dd, dd)
-    return max_dd  # e.g. 0.25 => 25% drop from peak
+    return max_dd  
 
 def calculate_calmar_ratio(equity_curve, periods_per_year=365):
     """
@@ -443,7 +469,7 @@ def stability_of_returns(returns, threshold=0.02):
     # If you want "stability index," maybe 1 - fraction_big_moves
     return 1 - fraction_big_moves
 
-def plot_equity_vs_buyhold(portfolio_vals, price_series, initial_cash=25000.0):
+def plot_equity_vs_buyhold(portfolio_vals, price_series, initial_cash=30000.0):
     """
     Compare your RL portfolio to a naive buy-and-hold strategy on the same asset.
     portfolio_vals: array of your strategy's portfolio values
@@ -557,17 +583,20 @@ def run_tests(test_env, trained_agent, date_series):
     """
     # Evaluate trained agent
     # We'll do a step-by-step cumulative approach:
-    dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr = evaluate_agent_cumulative(test_env, trained_agent, date_series)
+    dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr, dqn_returns = evaluate_agent_cumulative(test_env, trained_agent, date_series)
     total_reward = dqn_cum_profits[-1] if len(dqn_cum_profits) > 0 else 0
     print(f"DQN Total Reward (final cum profit) = {total_reward:.2f}")
     print(f"DQN Action Distribution = {Counter(dqn_actions)}")
 
     sdp_model = CryptoSDPModel(test_env.price_series, test_env.volume_series)
-    sdp_dates, sdp_cum_profits, sdp_actions,sdp_plr = evaluate_heuristic_sdp_cumulative(sdp_model, date_series)
+    sdp_dates, sdp_cum_profits, sdp_actions,sdp_plr, sdp_returns = evaluate_heuristic_sdp_cumulative(sdp_model, date_series)
     print(f"SDP Total Reward: {sdp_cum_profits[-1]:.2f}")
     print(f"SDP Actions Distribution: {Counter(sdp_actions)}")
+    print(f"SDP returns SDP: {Counter(sdp_returns)}")
+
 
     # Evaluate Simple Policy
-    simp_dates, simp_cumprofits, simp_step_actions,simple_plr = evaluate_simple_policy_cumulative(test_env, date_series)
+    simp_dates, simp_cumprofits, simp_step_actions, simple_plr, simp_returns = evaluate_simple_policy_cumulative(test_env, date_series)
     print(f"Simple Policy Total Reward: {simp_cumprofits[-1]:.2f}")
     print(f"Simple Policy Actions Distribution: {Counter(simp_step_actions)}")
+    print(f"SDP returns simple: {Counter(simp_returns)}")

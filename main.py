@@ -9,11 +9,9 @@ from sklearn.model_selection import TimeSeriesSplit
 from environments.CryptoEnvRL import CryptoEnvRL
 from models.RLAgent import DQNAgent
 from collections import Counter, deque
-from test import run_tests
-from utils import evaluate_agent
-
 
 from test import (
+                run_tests,
                 calculate_sharpe_ratio,
                 calculate_sortino_ratio,
                 calculate_calmar_ratio,
@@ -30,7 +28,8 @@ from test import (
                 plot_trade_distribution,
                 plot_portfolio_value,
                 evaluate_portfolio_on_training_data,
-                evaluate_agent_cumulative_with_portfolio
+                evaluate_agent_cumulative_with_portfolio,
+                stability_of_returns
             )
 
 from environments.CryptoSDPModel import CryptoSDPModel, advanced_heuristic_policy_sdp
@@ -58,8 +57,8 @@ def load_data(folder, cryptocurrencies):
             df = pd.read_csv(file_path, index_col="Date", parse_dates=["Date"])
             df.sort_index(inplace=True)
 
-            train_data = df.loc["2017-01-01":"2022-12-31"]
-            test_data = df.loc["2023-01-01":"2024-01-01"]
+            train_data = df.loc["2017-01-01":"2022-06-23"]
+            test_data = df.loc["2022-06-24":"2024-01-01"]
             data[symbol] = (train_data, test_data)
         else:
             print(f"Data for {symbol} not found in {folder}.")
@@ -72,7 +71,7 @@ if __name__ == "__main__":
     data = load_data(folder, cryptocurrencies)
 
     # Training parameters
-    episodes = 30
+    episodes = 200
     batch_size = 32
 
     # Lists for tracking
@@ -98,11 +97,10 @@ if __name__ == "__main__":
         # ------------------------------------------------
         # Initialize environment (with 11-feature state) and DQN agent
         # ------------------------------------------------
-        # By default, your CryptoEnvRL has single-share logic + a cash constraint
         env = CryptoEnvRL(
             price_series_train, 
             volume_series_train,  
-            initial_cash=25000.0  # or any chosen amount
+            initial_cash=30000.0  # or any chosen amount
         )
 
         agent = DQNAgent(
@@ -120,7 +118,7 @@ if __name__ == "__main__":
         test_env = CryptoEnvRL(
             price_series_test, 
             volume_series_test,
-            initial_cash=25000.0
+            initial_cash=30000.0
         )
         trained_agent = DQNAgent(
             state_size=11,
@@ -231,8 +229,6 @@ if __name__ == "__main__":
         solino_ratio = calculate_sortino_ratio(returns)
         print(f"Solino Ratio for {symbol}: {solino_ratio:.4f}")
 
-        sharpe_rat = calculate_sharpe_ratio(returns)
-
         vol = np.std(episode_portfolio_values)
 
         print("\nAction Distribution (Train Loop Overall):")
@@ -243,59 +239,87 @@ if __name__ == "__main__":
         # ------------------------------------------------
         # Evaluate the trained DQN on the test set
         # ------------------------------------------------
-        from test import run_tests
+      
         run_tests(test_env, trained_agent, date_series_test)
-        evaluate_agent(env, agent, episodes=30)
 
         analyze_rolling_std(price_series_test)
 
         # Evaluate DQN step by step
-        dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr = evaluate_agent_cumulative(
+        dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr,dqn_returns = evaluate_agent_cumulative(
             test_env, trained_agent, date_series_test
         )
         dqn_final = dqn_cum_profits[-1] if dqn_cum_profits else 0
-        dqn_sharpe = calculate_sharpe_ratio(dqn_cum_profits)
-        dqn_solino = calculate_sortino_ratio(dqn_cum_profits)
-        dqn_vol = np.std(dqn_cum_profits)
+
+        #print(f"[DEBUG] DQN Returns: {dqn_returns}")
+
+        dqn_sharpe = calculate_sharpe_ratio(dqn_returns)
+        dqn_solino = calculate_sortino_ratio(dqn_returns)
+        dqn_vol = np.std(dqn_returns)
         dqn_mdd = calculate_max_drawdown(dqn_cum_profits)
-        dqn_calmar = calculate_calmar_ratio(dqn_cum_profits) 
-        dqn_returns = np.diff(dqn_cum_profits, prepend=0)
+        dqn_annualised = calculate_calmar_ratio(dqn_cum_profits) 
+
+        # Calmar Ratio
+        if  dqn_mdd > 0:
+            dqn_calmar = dqn_annualised / dqn_mdd
+        else:
+            dqn_calmar = float('inf')
+        
+        stability = stability_of_returns(dqn_returns, threshold=0.02)
         dqn_win_rate, dqn_avg_return = calculate_trade_stats(dqn_actions, dqn_returns)
         print("DQN steps:", len(dqn_dates), len(dqn_cum_profits))
 
+        print(f"[DEBUG] PLR: {dqn_plr}, Win Rate: {dqn_win_rate}, Avg Trade Return: {dqn_avg_return}")
+        print(f"[DEBUG] DQN stability: {stability}")
+        
+
 
         # Evaluate SDP heuristic
-        sdp_model = CryptoSDPModel(price_series_test, volume_series_test, initial_cash=25000.0)
-        sdp_dates, sdp_cum_profits, sdp_actions, sdp_plr = evaluate_heuristic_sdp_cumulative(
+        sdp_model = CryptoSDPModel(price_series_test, volume_series_test, initial_cash=30000.0)
+        sdp_dates, sdp_cum_profits, sdp_actions, sdp_plr, sdp_returns = evaluate_heuristic_sdp_cumulative(
             sdp_model, date_series_test
         )
         sdp_final = sdp_cum_profits[-1] if sdp_cum_profits else 0
-        sdp_sharpe = calculate_sharpe_ratio(sdp_cum_profits)
-        sdp_solino = calculate_sortino_ratio(sdp_cum_profits)
-        sdp_vol = np.std(sdp_cum_profits)
+        sdp_sharpe = calculate_sharpe_ratio(sdp_returns)
+        sdp_solino = calculate_sortino_ratio(sdp_returns)
+        sdp_vol = np.std(sdp_returns)
         sdp_mdd = calculate_max_drawdown(sdp_cum_profits)
-        sdp_calmar = calculate_calmar_ratio(sdp_cum_profits) 
-        sdp_returns = np.diff(sdp_cum_profits, prepend=0)
+        sdp_annualised = calculate_calmar_ratio(sdp_cum_profits) 
+
+        if  sdp_mdd > 0:
+            sdp_calmar = sdp_annualised / sdp_mdd
+        else:
+            sdp_calmar = float('inf')
+
         sdp_win_rate, sdp_avg_return = calculate_trade_stats(sdp_actions, sdp_returns)
+
+        print(f"[DEBUG] SDP PLR: {sdp_plr}, SDP Win Rate: {sdp_win_rate}, SDP Avg Trade Return: {sdp_avg_return}")
+    
+        
 
         # Evaluate simple
         simp_env = CryptoEnvRL(
             price_series_test, 
             volume_series_test,
-            initial_cash=25000.0
+            initial_cash=30000.0
         )
-        simp_dates, simp_cumprofits, simp_step_actions, simple_plr = evaluate_simple_policy_cumulative(
-            test_env, date_series_test
+        simp_dates, simp_cumprofits, simp_step_actions, simple_plr, simp_returns = evaluate_simple_policy_cumulative(
+            simp_env, date_series_test
         )
         simple_final = simp_cumprofits[-1] if simp_cumprofits else 0
-        simple_sharpe = calculate_sharpe_ratio(simp_cumprofits)
-        simple_solino = calculate_sortino_ratio(simp_cumprofits)
-        simple_vol = np.std(simp_cumprofits)
+        simple_sharpe = calculate_sharpe_ratio(simp_returns)
+        simple_solino = calculate_sortino_ratio(simp_returns)
+        simple_vol = np.std(simp_returns)
         simple_mdd = calculate_max_drawdown(simp_cumprofits)
-        simple_calmar = calculate_calmar_ratio(simp_cumprofits) 
-        simple_returns = np.diff(simp_cumprofits, prepend=0)
-        simple_win_rate, simple_avg_return = calculate_trade_stats(simp_step_actions, simple_returns)
+        simple_annualised = calculate_calmar_ratio(simp_cumprofits) 
 
+        if  simple_mdd > 0:
+            simple_calmar = simple_annualised / simple_mdd
+        else:
+            simple_calmar = float('inf')
+            
+        simple_win_rate, simple_avg_return = calculate_trade_stats(simp_step_actions, simp_returns)
+
+        print(f"[DEBUG] Simple PLR: {simple_plr},  Win Rate: {simple_win_rate}, simple Avg Trade Return: {simple_avg_return}")
 
         # Plot three strategies
         plot_three_strategies(
@@ -303,6 +327,23 @@ if __name__ == "__main__":
             sdp_cum_profits, 
             simp_cumprofits
         )
+
+        results_df = pd.DataFrame({
+            "Algorithm": ["DQN", "SDP_HER", "Simple"],
+            "FinalProfit": [dqn_final, sdp_final, simple_final],
+            "SharpeRatio": [dqn_sharpe, sdp_sharpe, simple_sharpe],
+            "SolinoRatio": [dqn_solino, sdp_solino, simple_solino],
+            "MaxDrawdown": [dqn_mdd , sdp_mdd, simple_mdd],
+            "CalmarRatio": [dqn_calmar, sdp_calmar, simple_calmar],
+            "WinRate": [dqn_win_rate * 100, sdp_win_rate * 100, simple_win_rate * 100],
+            "AvgTradeReturn": [dqn_avg_return, sdp_avg_return, simple_avg_return],
+            "Volatility": [dqn_vol, sdp_vol, simple_vol],
+            "PLR": [dqn_plr, sdp_plr, simple_plr],
+            })
+        results_df = results_df[["Algorithm", "FinalProfit", "SharpeRatio", "SolinoRatio","MaxDrawdown", "CalmarRatio", "WinRate", "AvgTradeReturn", "Volatility", "PLR"]]
+
+        print("\nComparison of DQN, SDP-Her, and Simple on Test Data:")
+        print(results_df)
 
         def compare_actions(price_data, actions_dqn, label_dqn, actions_sdp, label_sdp):
             plt.figure(figsize=(12, 6))
@@ -329,25 +370,38 @@ if __name__ == "__main__":
             plt.legend()
             plt.show()
 
+
         # Compare actions visually
         compare_actions(price_series_test, dqn_actions, "DQN", sdp_actions, "SDP Heuristic")
-    
-        results_df = pd.DataFrame({
-        "Algorithm": ["DQN", "SDP_HER", "Simple"],
-        "FinalProfit": [dqn_final, sdp_final, simple_final],
-        "SharpeRatio": [dqn_sharpe, sdp_sharpe, simple_sharpe],
-        "SolinoRatio": [dqn_solino, sdp_solino, simple_solino],
-        "MaxDrawdown": [dqn_mdd, sdp_mdd, simple_mdd],
-        "CalmarRatio": [dqn_calmar, sdp_calmar, simple_calmar],
-        "WinRate": [dqn_win_rate, sdp_win_rate, simple_win_rate],
-        "AvgTradeReturn": [dqn_avg_return, sdp_avg_return, simple_avg_return],
-        "Volatility": [dqn_vol, sdp_vol, simple_vol],
-        "PLR": [dqn_plr, sdp_plr, simple_plr],
-        })
-        results_df = results_df[["Algorithm", "FinalProfit", "SharpeRatio", "SolinoRatio","MaxDrawdown", "CalmarRatio", "WinRate", "AvgTradeReturn", "Volatility", "PLR"]]
 
-        print("\nComparison of DQN, SDP-Her, and Simple on Test Data:")
-        print(results_df)
+        train_time_steps, train_portfolio_vals = evaluate_portfolio_on_training_data(env, agent)
+
+        dqn_dates, dqn_cum_rewards, dqn_portfolio_values, dqn_actions = evaluate_agent_cumulative_with_portfolio(
+            test_env, 
+            trained_agent, 
+            date_series_test
+        )
+
+        plot_portfolio_value(dqn_dates, dqn_portfolio_values, title="Agent's Portfolio Value on Test Data")
+
+        plot_portfolio_value(train_time_steps, train_portfolio_vals, title="Agent's Portfolio Value on Training Data")
+    
+        # results_df = pd.DataFrame({
+        # "Algorithm": ["DQN", "SDP_HER", "Simple"],
+        # "FinalProfit": [dqn_final, sdp_final, simple_final],
+        # "SharpeRatio": [dqn_sharpe, sdp_sharpe, simple_sharpe],
+        # "SolinoRatio": [dqn_solino, sdp_solino, simple_solino],
+        # "MaxDrawdown": [dqn_mdd, sdp_mdd, simple_mdd],
+        # "CalmarRatio": [dqn_calmar, sdp_calmar, simple_calmar],
+        # "WinRate": [dqn_win_rate, sdp_win_rate, simple_win_rate],
+        # "AvgTradeReturn": [dqn_avg_return, sdp_avg_return, simple_avg_return],
+        # "Volatility": [dqn_vol, sdp_vol, simple_vol],
+        # "PLR": [dqn_plr, sdp_plr, simple_plr],
+        # })
+        # results_df = results_df[["Algorithm", "FinalProfit", "SharpeRatio", "SolinoRatio","MaxDrawdown", "CalmarRatio", "WinRate", "AvgTradeReturn", "Volatility", "PLR"]]
+
+        # print("\nComparison of DQN, SDP-Her, and Simple on Test Data:")
+        # print(results_df)
 
 
         results_d = pd.DataFrame({
@@ -364,7 +418,7 @@ if __name__ == "__main__":
         print("\nComparison of DQN, SDP-Her, and Simple :")
         print(results_d)
    
-    plot_equity_vs_buyhold(dqn_cum_profits, price_series_test, initial_cash=25000.0)
+    plot_equity_vs_buyhold(dqn_cum_profits, price_series_test, initial_cash=35000.0)
     plot_drawdown(dqn_cum_profits)
     plot_return_distribution(dqn_returns)
     plot_trade_distribution(dqn_actions, dqn_returns)
