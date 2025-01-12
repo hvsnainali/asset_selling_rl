@@ -18,7 +18,7 @@ This project implements a **Deep Q-Network (DQN)**-based reinforcement learning 
 
 ## **Project Structure**
 ├── CryptoEnvRL.py # Custom environment for RL agents
-├── DQNetwork.py # Implementation of the Deep Q-Network 
+├── DQNetwork.py # Implementation of the DQN
 
 ├── CryptoSDPModel.py # SDP-based trading framework
 ├── RLAgent.py # RL agent controlling DQN actions 
