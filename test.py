@@ -581,8 +581,7 @@ def run_tests(test_env, trained_agent, date_series):
     Example test harness that runs the agent, prints total reward, 
     plus distributions of actions, then maybe calls other policies, etc.
     """
-    # Evaluate trained agent
-    # We'll do a step-by-step cumulative approach:
+   
     dqn_dates, dqn_cum_profits, dqn_actions, dqn_plr, dqn_returns = evaluate_agent_cumulative(test_env, trained_agent, date_series)
     total_reward = dqn_cum_profits[-1] if len(dqn_cum_profits) > 0 else 0
     print(f"DQN Total Reward (final cum profit) = {total_reward:.2f}")

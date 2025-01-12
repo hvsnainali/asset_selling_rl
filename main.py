@@ -47,8 +47,7 @@ def load_data(folder, cryptocurrencies):
         cryptocurrencies (list): List of symbols to load.
 
     Returns:
-        dict: Dictionary with cryptocurrency symbols as keys 
-              and (train_df, test_df) as values.
+        Data
     """
     data = {}
     for symbol in cryptocurrencies:
@@ -65,16 +64,13 @@ def load_data(folder, cryptocurrencies):
     return data
 
 if __name__ == "__main__":
-    # Loading cryptocurrency data
     folder = "data"
     cryptocurrencies = ["BTC-USD","ETH-USD"]
     data = load_data(folder, cryptocurrencies)
 
-    # Training parameters
-    episodes = 200
-    batch_size = 32
+    episodes = 5
+    batch_size = 64
 
-    # Lists for tracking
     episode_rewards = []    # total rewards per episode
     training_losses = []    # average training loss per episode
     action_counts = Counter()
@@ -95,12 +91,12 @@ if __name__ == "__main__":
         print(f"Test data: {len(price_series_test)} entries from {date_series_test[0]} to {date_series_test[-1]}")
 
         # ------------------------------------------------
-        # Initialize environment (with 11-feature state) and DQN agent
+        # Initialize environment (11-feature state) and DQN agent
         # ------------------------------------------------
         env = CryptoEnvRL(
             price_series_train, 
             volume_series_train,  
-            initial_cash=30000.0  # or any chosen amount
+            initial_cash=30000.0  
         )
 
         agent = DQNAgent(
@@ -150,7 +146,7 @@ if __name__ == "__main__":
             successful_trades = 0
             unsuccessful_trades = 0
 
-            # (Optional) Debug Q-values in the first episode
+            # Debug Q-values in the first 20 Steps
             if e == 0:
                 print("Debugging Q-values for first 20 steps:")
                 for dbg_step in range(20):
@@ -294,7 +290,6 @@ if __name__ == "__main__":
 
         print(f"[DEBUG] SDP PLR: {sdp_plr}, SDP Win Rate: {sdp_win_rate}, SDP Avg Trade Return: {sdp_avg_return}")
     
-        
 
         # Evaluate simple
         simp_env = CryptoEnvRL(
@@ -385,23 +380,6 @@ if __name__ == "__main__":
         plot_portfolio_value(dqn_dates, dqn_portfolio_values, title="Agent's Portfolio Value on Test Data")
 
         plot_portfolio_value(train_time_steps, train_portfolio_vals, title="Agent's Portfolio Value on Training Data")
-    
-        # results_df = pd.DataFrame({
-        # "Algorithm": ["DQN", "SDP_HER", "Simple"],
-        # "FinalProfit": [dqn_final, sdp_final, simple_final],
-        # "SharpeRatio": [dqn_sharpe, sdp_sharpe, simple_sharpe],
-        # "SolinoRatio": [dqn_solino, sdp_solino, simple_solino],
-        # "MaxDrawdown": [dqn_mdd, sdp_mdd, simple_mdd],
-        # "CalmarRatio": [dqn_calmar, sdp_calmar, simple_calmar],
-        # "WinRate": [dqn_win_rate, sdp_win_rate, simple_win_rate],
-        # "AvgTradeReturn": [dqn_avg_return, sdp_avg_return, simple_avg_return],
-        # "Volatility": [dqn_vol, sdp_vol, simple_vol],
-        # "PLR": [dqn_plr, sdp_plr, simple_plr],
-        # })
-        # results_df = results_df[["Algorithm", "FinalProfit", "SharpeRatio", "SolinoRatio","MaxDrawdown", "CalmarRatio", "WinRate", "AvgTradeReturn", "Volatility", "PLR"]]
-
-        # print("\nComparison of DQN, SDP-Her, and Simple on Test Data:")
-        # print(results_df)
 
 
         results_d = pd.DataFrame({

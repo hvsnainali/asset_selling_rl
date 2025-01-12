@@ -59,7 +59,7 @@ class CryptoEnvRL(Env):
         # VWAP
         cumulative_price_volume = np.cumsum(prices * volumes)
         cumulative_volume = np.cumsum(volumes)
-        self.vwap = cumulative_price_volume / (cumulative_volume + 1e-9)  # Avoid division by zero
+        self.vwap = cumulative_price_volume / (cumulative_volume + 1e-9)  
 
         self.vwap = (self.vwap - np.mean(self.vwap)) / np.std(self.vwap)
 
@@ -67,13 +67,12 @@ class CryptoEnvRL(Env):
         ema_12 = pd.Series(prices).ewm(span=12, adjust=False).mean()
         ema_26 = pd.Series(prices).ewm(span=26, adjust=False).mean()
         self.macd = ema_12 - ema_26
-        # signal_line = self.macd.ewm(span=9, adjust=False).mean()
 
         self.macd = (self.macd -np.mean(self.macd)) / np.std(self.macd)
 
-        # Normalize Volume + Close Price
+        # Normalize Volume 
         self.volume_series = (volumes - np.mean(volumes)) / np.std(volumes)
-        #self.price_series = (prices - np.mean(prices)) / np.std(prices)
+
 
     def exog_info_fn(self):
         """
@@ -112,10 +111,7 @@ class CryptoEnvRL(Env):
         return (state - np.mean(state)) / (np.std(state) + 1e-8)
 
     def reset(self):
-        # Reset time step
         self.t = 0
-
-        # Reset stock-related variables
         self.stock_owned = 0
         self.buy_price = 0
 
@@ -124,36 +120,16 @@ class CryptoEnvRL(Env):
         # Reset cumulative metrics
         self.total_reward = 0
         self.total_profit = 0
-       
 
-        # Recalculate indicators (if necessary)
         self._calculate_indicators()
 
-        # Return the initial observation
         return self._get_observation()
 
 
     def step(self, action):
         reward = -0.01  # Default time penalty
         current_price = self.price_series[self.t]
-        # rsi = self.rsi[self.t]
-        # sma_current = self.sma[self.t]
-        # sma_previous = self.sma[self.t - 1] if self.t > 0 else self.sma[self.t]
-        # macd = self.macd[self.t]
-
-        # if action == 'auto':  # Allow automatic decision-making
-        #     action = self.decide_trade(rsi, sma_current, sma_previous, macd)
-
-        # recent_volatility = np.std(self.price_series[max(0, self.t - 10): self.t])
-        # recent_trend = 0
-        # if self.t > 5:  # Ensure enough history is available
-        #         recent_trend = np.mean(self.price_series[self.t - 5:self.t]) - self.price_series[self.t - 6]
-
-        # if self.last_action == action:
-        #    reward -= 0.10  # Penalize repeated actions 
-
-        # # #         # Save current action for the next step
-        # self.last_action = action
+        
         rsi = self.rsi[self.t]
         sma = self.sma[self.t]
         mom = self.momentum[self.t]
@@ -211,30 +187,6 @@ class CryptoEnvRL(Env):
                     reward -= 0.01
             else:
                 reward = -1
-        # if action == 0:  # Buy
-        #     if self.stock_owned == 0:
-        #         # Check if we have enough cash
-        #         if self.cash >= current_price:
-        #             self.stock_owned = 1
-        #             self.buy_price = current_price
-        #             self.cash -= current_price
-        #         else:
-        #             # Not enough cash
-        #             reward -= 1
-
-        # elif action == 1:  # Hold
-        #     reward -= 1  # or smaller/larger penalty if you like
-
-        # elif action == 2:  # Sell
-        #     if self.stock_owned == 1:
-        #         # Realize profit or loss
-        #         profit = current_price - self.buy_price
-        #         reward += profit
-        #         self.cash += current_price
-        #         self.stock_owned = 0
-        #         self.buy_price = 0.0
-        #     else:
-        #         reward -= 1 
             
         reward = np.clip(reward, -50, 100)
 
