@@ -1,4 +1,4 @@
-# **Optimizing Cryptocurrency Trading Decisions Using Deep Q-Networks**
+# **Optimising Cryptocurrency Trading Decisions Using Deep Q-Networks**
 
 ## **Overview**
 This project implements a **Deep Q-Network (DQN)**-based reinforcement learning framework for optimizing cryptocurrency trading decisions. The study evaluates the performance of the DQN model in comparison to a **Sequential Decision Problem (SDP)** framework and a **Simple Policy** heuristic. It demonstrates the superiority of DQN in volatile market conditions through dynamic learning and adaptive decision-making.
